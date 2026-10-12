@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Phối Cảnh Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;800;900&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+:root{
+  --ink:#0E1622; --panel:#152131; --raise:#1C2B3F; --line:#24344A;
+  --text:#E7ECF2; --mute:#8A9BB0; --gold:#E9B23C; --gold-soft:#E9B23C22; --beam:#41E8FF; --leaf:#2BD47A; --warn:#FF7A6B;
+  --mono:'JetBrains Mono',Consolas,monospace; --ui:'Be Vietnam Pro',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0}
+[hidden]{display:none!important}
+html,body{height:100%;background:var(--ink);color:var(--text);font:500 13px/1.45 var(--ui)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:var(--raise);border-radius:8px;padding:7px 12px}
+button:hover{border-color:#3A5070}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--beam);outline-offset:1px}
+button.primary{background:var(--gold);border-color:var(--gold);color:#1A1204;font-weight:800}
+button.ghost{background:none;border-color:transparent;color:var(--mute)}
+button.ghost:hover{color:var(--text);border-color:var(--line)}
+.app{display:grid;grid-template:56px 1fr 132px/232px 1fr 312px;height:100vh}
+
+header{grid-column:1/-1;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto;font-weight:900;letter-spacing:.02em;font-size:15px}
+.brand svg{width:22px;height:26px}
+.brand small{font:500 11px var(--mono);color:var(--mute);letter-spacing:.08em;text-transform:uppercase}
+header select{background:var(--raise);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+#exportBtn{min-width:132px}
+
+aside{background:var(--panel);overflow:auto}
+#scenesPane{border-right:1px solid var(--line);padding:14px 12px;display:flex;flex-direction:column;gap:10px}
+#inspector{border-left:1px solid var(--line);padding:14px}
+.eyebrow{font:700 10.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--mute);display:flex;justify-content:space-between;align-items:center}
+.scene{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--ink);text-align:left;padding:0;width:100%}
+.scene img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;opacity:.85}
+.scene .meta{display:flex;justify-content:space-between;padding:6px 9px;font-size:12px}
+.scene .meta span:last-child{font-family:var(--mono);color:var(--mute)}
+.scene.on{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold)}
+.scene.on img{opacity:1}
+.addScene{border-style:dashed;color:var(--mute);padding:18px 10px;text-align:center}
+
+main{position:relative;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 40%,#132034,#0A111B 70%);overflow:hidden;min-width:0}
+#stage{max-width:calc(100% - 120px);max-height:calc(100% - 40px);box-shadow:0 20px 60px rgba(0,0,0,.55),0 0 0 1px var(--line);border-radius:4px;background:#0b1119}
+#stage.draw{cursor:crosshair}
+.tools{position:absolute;left:14px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:6px;padding:6px;background:rgba(21,33,49,.92);border:1px solid var(--line);border-radius:12px}
+.tools button{width:62px;padding:7px 4px 6px;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;color:var(--mute);background:none;border-color:transparent}
+.tools button svg{width:34px;height:22px}
+.tools button.on{background:var(--gold-soft);border-color:var(--gold);color:var(--text)}
+.hint{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:rgba(14,22,34,.92);border:1px solid var(--line);border-radius:999px;padding:7px 16px;color:var(--mute);font-size:12px;white-space:nowrap}
+.hint b{color:var(--gold);font-weight:600}
+.modeSwitch{position:absolute;right:14px;top:14px;display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:rgba(21,33,49,.92)}
+.modeSwitch button{border:0;border-radius:0;background:none;color:var(--mute);padding:6px 14px}
+.modeSwitch button.on{background:var(--raise);color:var(--text)}
+.empty{position:absolute;inset:0;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;text-align:center;color:var(--mute)}
+.empty h2{color:var(--text);font-size:22px;font-weight:800}
+.empty div{display:flex;gap:10px}
+
+#inspector h3{font-size:16px;font-weight:800;margin:4px 0 12px}
+.field{display:grid;grid-template-columns:96px 1fr;align-items:center;gap:8px;margin-bottom:9px}
+.field>span{color:var(--mute);font-size:12px}
+.field input[type=text],.field input[type=number],.field select,.field textarea{width:100%;background:var(--ink);border:1px solid var(--line);border-radius:7px;padding:6px 8px}
+.field textarea{resize:vertical;min-height:62px}
+.field input[type=range]{width:100%;accent-color:var(--gold)}
+.field input[type=color]{width:100%;height:30px;border:1px solid var(--line);border-radius:7px;background:var(--ink);padding:2px}
+.field .val{font:500 11px var(--mono);color:var(--mute);text-align:right}
+.rangeRow{display:grid;grid-template-columns:1fr 44px;gap:6px;align-items:center}
+.layers{display:flex;flex-direction:column;gap:4px;margin:6px 0 14px}
+.layer{display:grid;grid-template-columns:20px 1fr auto;gap:8px;align-items:center;text-align:left;padding:6px 8px;background:none}
+.layer i{width:10px;height:10px;border-radius:3px;justify-self:center}
+.layer em{font:normal 11px var(--mono);color:var(--mute)}
+.layer.on{border-color:var(--beam);background:#41E8FF14}
+.row{display:flex;gap:6px;flex-wrap:wrap}
+hr{border:0;border-top:1px solid var(--line);margin:14px 0}
+.danger{color:var(--warn)}
+button.armed{background:var(--warn);border-color:var(--warn);color:#1A0603;font-weight:800}
+
+footer{grid-column:1/-1;border-top:1px solid var(--line);background:var(--panel);display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center;padding:12px 16px}
+.transport{display:flex;align-items:center;gap:10px}
+#play{width:44px;height:44px;border-radius:50%;background:var(--gold);border-color:var(--gold);color:#1A1204;font-size:16px;padding:0}
+#clock{font:700 15px var(--mono);min-width:118px}
+#clock small{color:var(--mute);font-weight:500}
+.strip{position:relative;height:96px;border-radius:8px;overflow:hidden;background:var(--ink);border:1px solid var(--line);cursor:pointer}
+.strip .seg{position:absolute;top:0;bottom:0;border-right:2px solid var(--ink);background-size:cover;background-position:center;opacity:.55}
+.strip .seg.on{opacity:.95}
+.strip .seg b{position:absolute;left:8px;bottom:6px;font:700 11px var(--mono);text-shadow:0 1px 3px #000}
+.strip .tick{position:absolute;bottom:0;width:3px;height:9px;border-radius:2px}
+#head{position:absolute;top:0;bottom:0;width:2px;background:var(--beam);box-shadow:0 0 10px var(--beam);pointer-events:none}
+#head::before{content:'';position:absolute;top:-1px;left:-5px;border:6px solid transparent;border-top-color:var(--beam)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media (max-width:900px){.app{grid-template:56px 1fr 120px auto/1fr}#scenesPane{display:none}#inspector{grid-column:1;max-height:40vh;border-left:0;border-top:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <svg viewBox="-44 -122 88 124" aria-hidden="true"><path d="M0 0 C-14-22 -42-46 -42-78 A42 42 0 1 1 42-78 C42-46 14-22 0 0Z" fill="#E9B23C"/><circle cy="-80" r="27" fill="#0F7A45"/></svg>
+      Phối Cảnh Studio <small>video dự án</small>
+    </div>
+    <select id="aspect" title="Khung hình"><option value="1920x1080">Ngang 16:9</option><option value="1080x1920">Dọc 9:16</option></select>
+    <select id="fps" title="Số khung hình mỗi giây"><option>30</option><option>60</option></select>
+    <button class="ghost" id="newBtn">Dự án mới</button>
+    <button class="ghost" id="openBtn">Mở tệp</button>
+    <button class="ghost" id="saveBtn">Lưu tệp</button>
+    <button class="primary" id="exportBtn">Xuất MP4</button>
+  </header>
+
+  <aside id="scenesPane">
+    <div class="eyebrow">Cảnh <span id="total"></span></div>
+    <div id="scenes" class="row" style="flex-direction:column"></div>
+    <button class="scene addScene" id="addScene">+ Thêm cảnh từ ảnh</button>
+  </aside>
+
+  <main>
+    <canvas id="stage" width="1920" height="1080"></canvas>
+    <nav class="tools" id="tools" aria-label="Công cụ">
+      <button data-tool="select" class="on" title="Chọn và kéo (V)"><svg viewBox="0 0 34 22"><path d="M12 3 L12 18 L16 14 L19 20 L21 19 L18 13 L23 13Z" fill="currentColor"/></svg>Chọn</button>
+      <button data-tool="pin" title="Ghim (G)"><svg viewBox="-44 -122 88 124" preserveAspectRatio="xMidYMid meet"><path d="M0 0 C-14-22 -42-46 -42-78 A42 42 0 1 1 42-78 C42-46 14-22 0 0Z" fill="#E9B23C"/><circle cy="-80" r="27" fill="#0F7A45"/></svg>Ghim</button>
+      <button data-tool="route" title="Tuyến sáng (T)"><svg viewBox="0 0 34 22"><path d="M3 18 C10 16 14 6 31 4" stroke="#41E8FF" stroke-width="5" fill="none" stroke-linecap="round" opacity=".45"/><path d="M3 18 C10 16 14 6 31 4" stroke="#E9FDFF" stroke-width="2" fill="none" stroke-linecap="round"/></svg>Tuyến</button>
+      <button data-tool="callout" title="Nhãn tiện ích (N)"><svg viewBox="0 0 34 22"><rect x="3" y="2" width="28" height="10" rx="5" fill="#2BD47A"/><path d="M17 12 V19" stroke="#fff" stroke-width="1.5"/><circle cx="17" cy="19" r="2" fill="#fff"/></svg>Nhãn</button>
+      <button data-tool="highlight" title="Tô khối (K)"><svg viewBox="0 0 34 22"><path d="M8 20 V8 L14 3 H26 V20Z" fill="#FFE600"/></svg>Tô khối</button>
+      <button data-tool="tag" title="Thẻ thông số (S)"><svg viewBox="0 0 34 22"><text x="31" y="11" text-anchor="end" font-size="10" font-weight="900" fill="#C6E000" transform="rotate(-9 31 11)">ABC</text><text x="31" y="20" text-anchor="end" font-size="8" font-weight="800" fill="#fff" transform="rotate(-9 31 20)">109m²</text></svg>Thông số</button>
+      <button data-tool="ptext" title="Chữ phối cảnh (P)"><svg viewBox="0 0 34 22"><path d="M8 5 L28 3 L32 18 L2 20Z" fill="none" stroke="#FFE34D" stroke-width="1" stroke-dasharray="2 2"/><text x="17" y="15" text-anchor="middle" font-size="8" font-weight="900" fill="#FFE34D" transform="skewX(-14) translate(3 0)">ĐƯỜNG</text></svg>Chữ nghiêng</button>
+      <button data-tool="focus" title="Tâm camera (C)"><svg viewBox="0 0 34 22"><circle cx="17" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M17 1 V6 M17 16 V21 M7 11 H12 M22 11 H27" stroke="currentColor" stroke-width="1.6"/></svg>Tâm cam</button>
+    </nav>
+    <div class="modeSwitch" role="group" aria-label="Chế độ khung xem"><button id="editMode" class="on">Sửa</button><button id="viewMode">Xem</button></div>
+    <div class="hint" id="hint"></div>
+    <div class="empty" id="empty">
+      <h2>Bắt đầu từ một ảnh phối cảnh</h2>
+      <p>Thêm ảnh dự án, rồi đặt ghim, tuyến sáng và nhãn tiện ích lên ảnh.</p>
+      <div><button class="primary" id="emptyAdd">Thêm ảnh phối cảnh</button><button id="demoBtn">Mở dự án mẫu</button></div>
+    </div>
+  </main>
+
+  <aside id="inspector"></aside>
+
+  <footer>
+    <div class="transport">
+      <button id="play" aria-label="Phát">▶</button>
+      <div id="clock">0.0 <small>/ 0.0 s</small></div>
+    </div>
+    <div class="strip" id="strip"><div id="head"></div></div>
+  </footer>
+</div>
+<input type="file" id="imgInput" accept="image/*" multiple hidden>
+<input type="file" id="jsonInput" accept=".json,application/json" hidden>
+<script type="module" src="app.js"></script>
+</body>
+</html>

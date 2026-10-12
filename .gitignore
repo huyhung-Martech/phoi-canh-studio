@@ -1,0 +1,4 @@
+# Tài liệu nội bộ và bản thử nghiệm ban đầu, chỉ giữ trên máy
+FEATURES.md
+demo-phoi-canh/*
+!demo-phoi-canh/nen*.jpg

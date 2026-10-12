@@ -1,0 +1,347 @@
+{
+ "w": 1920,
+ "h": 1080,
+ "fps": 30,
+ "scenes": [
+  {
+   "id": "s1",
+   "name": "Toàn cảnh",
+   "image": "../demo-phoi-canh/nen1.jpg",
+   "dur": 3.5,
+   "trans": "cut",
+   "cam": {
+    "zoom": 0.1,
+    "ox": 1080,
+    "oy": 440,
+    "dx": -30,
+    "dy": -8
+   },
+   "look": {},
+   "layers": [
+    {
+     "type": "pin",
+     "x": 1080,
+     "y": 440,
+     "size": 1.5,
+     "at": 0.4,
+     "label": "SX5-01",
+     "labelAt": 1.0,
+     "focus": true
+    }
+   ]
+  },
+  {
+   "id": "s2",
+   "name": "Căn liền kề góc",
+   "image": "../demo-phoi-canh/nen2.jpg",
+   "dur": 5.6,
+   "trans": "flash",
+   "cam": {
+    "zoom": 0.07,
+    "ox": 1300,
+    "oy": 560,
+    "dx": 20
+   },
+   "look": {},
+   "layers": [
+    {
+     "type": "highlight",
+     "pts": [
+      [
+       1014,
+       360
+      ],
+      [
+       1185,
+       195
+      ],
+      [
+       1230,
+       165
+      ],
+      [
+       1463,
+       180
+      ],
+      [
+       1575,
+       285
+      ],
+      [
+       1568,
+       1020
+      ],
+      [
+       1014,
+       998
+      ]
+     ],
+     "color": "#FFE600",
+     "blink": true,
+     "at": 0
+    },
+    {
+     "type": "tag",
+     "x": 975,
+     "y": 385,
+     "rot": -9,
+     "title": "LIỀN KỀ GÓC",
+     "rows": [
+      {
+       "label": "DT đất",
+       "value": 109.3,
+       "unit": "m²"
+      },
+      {
+       "label": "DTXD",
+       "value": 323.2,
+       "unit": "m²"
+      }
+     ],
+     "at": 0.5
+    }
+   ]
+  },
+  {
+   "id": "s3",
+   "name": "Kết nối giao thông",
+   "image": "../demo-phoi-canh/nen3.jpg",
+   "dur": 3.5,
+   "trans": "leak",
+   "cam": {
+    "zoom": 0.08,
+    "ox": 1050,
+    "oy": 470,
+    "rot": 1.2
+   },
+   "look": {
+    "bright": 0.9,
+    "contrast": 1.18,
+    "sat": 1.15
+   },
+   "layers": [
+    {
+     "type": "route",
+     "pts": [
+      [
+       1100,
+       940
+      ],
+      [
+       1215,
+       725
+      ],
+      [
+       1325,
+       505
+      ],
+      [
+       1400,
+       330
+      ],
+      [
+       1450,
+       235
+      ]
+     ],
+     "color": "#41E8FF",
+     "width": 1,
+     "at": 0.35,
+     "dur": 1.1
+    },
+    {
+     "type": "route",
+     "pts": [
+      [
+       0,
+       612
+      ],
+      [
+       350,
+       662
+      ],
+      [
+       700,
+       742
+      ],
+      [
+       1000,
+       820
+      ],
+      [
+       1450,
+       895
+      ],
+      [
+       1920,
+       968
+      ]
+     ],
+     "color": "#7FA8FF",
+     "width": 1.2,
+     "at": 0.6,
+     "dur": 1.3
+    },
+    {
+     "type": "pin",
+     "x": 1050,
+     "y": 470,
+     "size": 1.3,
+     "at": 0.1,
+     "label": "",
+     "focus": false
+    },
+    {
+     "type": "ptext",
+     "quad": [
+      [
+       1148,
+       731
+      ],
+      [
+       1318,
+       445
+      ],
+      [
+       1362,
+       468
+      ],
+      [
+       1210,
+       763
+      ]
+     ],
+     "text": "TRỤC CHÍNH 50M",
+     "style": "road",
+     "at": 1.25
+    },
+    {
+     "type": "ptext",
+     "quad": [
+      [
+       470,
+       618
+      ],
+      [
+       1080,
+       780
+      ],
+      [
+       1070,
+       830
+      ],
+      [
+       458,
+       662
+      ]
+     ],
+     "text": "ĐƯỜNG VEN SÔNG 30M",
+     "style": "road",
+     "at": 1.6
+    }
+   ]
+  },
+  {
+   "id": "s4",
+   "name": "Tiện ích nội khu",
+   "image": "../demo-phoi-canh/nen4.jpg",
+   "dur": 4.7,
+   "trans": "fade",
+   "cam": {
+    "zoom": 0.07,
+    "ox": 930,
+    "oy": 505,
+    "dx": -20,
+    "dy": 10
+   },
+   "look": {},
+   "layers": [
+    {
+     "type": "pin",
+     "x": 930,
+     "y": 505,
+     "size": 1.3,
+     "at": 0.05,
+     "label": "",
+     "focus": false
+    },
+    {
+     "type": "callout",
+     "x": 510,
+     "y": 335,
+     "text": "SÂN GOLF",
+     "stem": 90,
+     "color": "#2BD47A",
+     "at": 0.5
+    },
+    {
+     "type": "callout",
+     "x": 630,
+     "y": 610,
+     "text": "CÔNG VIÊN NỘI KHU",
+     "stem": 70,
+     "color": "#2BD47A",
+     "at": 0.85
+    },
+    {
+     "type": "callout",
+     "x": 1160,
+     "y": 330,
+     "text": "TIỆN ÍCH THƯƠNG MẠI",
+     "stem": 80,
+     "color": "#2BD47A",
+     "at": 1.2
+    },
+    {
+     "type": "callout",
+     "x": 1450,
+     "y": 560,
+     "text": "BIỂN HỒ",
+     "stem": 120,
+     "color": "#2BD47A",
+     "at": 1.55
+    }
+   ]
+  },
+  {
+   "id": "s5",
+   "name": "Đô thị biển",
+   "image": "../demo-phoi-canh/nen5.jpg",
+   "dur": 3.4,
+   "trans": "swipe",
+   "cam": {
+    "zoom": 0.06,
+    "ox": 1000,
+    "oy": 700,
+    "dy": -25
+   },
+   "look": {},
+   "layers": [
+    {
+     "type": "ptext",
+     "quad": [
+      [
+       815,
+       600
+      ],
+      [
+       1170,
+       555
+      ],
+      [
+       1370,
+       715
+      ],
+      [
+       650,
+       900
+      ]
+     ],
+     "text": "ĐÔ THỊ BIỂN\nNGHỈ DƯỠNG\nBẬC NHẤT PHÍA NAM",
+     "style": "water",
+     "at": 0.6
+    }
+   ]
+  }
+ ]
+}
