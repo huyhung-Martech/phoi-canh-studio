@@ -2,3 +2,4 @@
 FEATURES.md
 demo-phoi-canh/*
 !demo-phoi-canh/nen*.jpg
+_test/

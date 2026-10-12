@@ -1,9 +1,9 @@
-import { drawFrame, timeline, sceneAt, handles, FONT, TRANSITIONS } from './render.js';
+import { drawFrame, timeline, sceneAt, handles, imageBox, FONT, TRANSITIONS, setOnMediaLoad, preloadMedia } from './render.js';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), ctx = stage.getContext('2d');
-const COLOR = { pin: '#E9B23C', route: '#41E8FF', callout: '#2BD47A', highlight: '#FFE600', tag: '#C6E000', ptext: '#FFE34D' };
-const NAME = { pin: 'Ghim', route: 'Tuyến sáng', callout: 'Nhãn', highlight: 'Tô khối', tag: 'Thông số', ptext: 'Chữ nghiêng' };
+const COLOR = { pin: '#E9B23C', route: '#41E8FF', callout: '#2BD47A', highlight: '#FFE600', tag: '#C6E000', ptext: '#FFE34D', image: '#B9C6FF' };
+const NAME = { pin: 'Ghim', route: 'Tuyến sáng', callout: 'Nhãn', highlight: 'Tô khối', tag: 'Thông số', ptext: 'Chữ nghiêng', image: 'Ảnh chèn' };
 const HINT = {
   select: 'Bấm vào lớp để chọn · kéo <b>điểm</b> để sửa · giữ <b>Shift</b> khi kéo để dời cả lớp · <b>Delete</b> để xoá',
   pin: 'Bấm lên ảnh để đặt <b>ghim</b>',
@@ -12,17 +12,19 @@ const HINT = {
   highlight: 'Bấm các góc quanh khối nhà · <b>Enter</b> hoặc bấm đúp để xong',
   tag: 'Bấm vào chỗ đặt <b>mép phải</b> của thẻ thông số',
   ptext: 'Bấm 4 góc mặt phẳng theo thứ tự <b>trái trên → phải trên → phải dưới → trái dưới</b>',
+  image: 'Bấm vào chỗ muốn đặt ảnh rồi <b>chọn tệp ảnh</b> · kéo chấm góc để đổi cỡ',
   focus: 'Bấm vào điểm camera sẽ đẩy vào',
 };
-const KEYS = { v: 'select', g: 'pin', t: 'route', n: 'callout', k: 'highlight', s: 'tag', p: 'ptext', c: 'focus' };
+const KEYS = { v: 'select', g: 'pin', t: 'route', n: 'callout', k: 'highlight', s: 'tag', p: 'ptext', a: 'image', c: 'focus' };
 
 let P = { w: 1920, h: 1080, fps: 30, scenes: [] };
-let cur = 0, sel = null, tool = 'select', draft = [], mode = 'edit', t = 0, playing = false, camM = new DOMMatrix(), drag = null, replacing = false, exporting = null;
+let cur = 0, sel = null, tool = 'select', draft = [], mode = 'edit', t = 0, playing = false, camM = new DOMMatrix(), drag = null, replacing = false, exporting = null, imgAt = null;
 const imgs = {};
 const uid = () => Math.random().toString(36).slice(2, 9);
 const scene = () => P.scenes[cur];
+const thumbOf = sc => sc.thumb || sc.image;
 
-// ---------- Lưu tự động vào trình duyệt (IndexedDB chứa được ảnh nặng, localStorage thì không)
+// ---------- Lưu tự động vào trình duyệt (IndexedDB chứa được ảnh, video nặng; localStorage thì không)
 const dbp = new Promise(res => {
   const q = indexedDB.open('phoi-canh-studio', 1);
   q.onupgradeneeded = () => q.result.createObjectStore('kv');
@@ -40,16 +42,66 @@ async function idb(value) {
 let saveTimer;
 const save = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => idb(P), 400); };
 
-// ---------- Vẽ
-function syncImgs() {
-  for (const sc of P.scenes) if (imgs[sc.id]?.dataset.src !== sc.image) {
-    const im = new Image();
-    im.dataset.src = sc.image; im.onload = redraw; im.src = sc.image;
-    imgs[sc.id] = im;
+// ---------- Ảnh / video nền của các cảnh
+// Video phải nằm trong trang (dù rất nhỏ) thì trình duyệt mới báo đúng lúc khung hình đã sẵn sàng sau khi tua
+const vbox = document.createElement('div');
+vbox.style.cssText = 'position:fixed;right:0;bottom:0;width:2px;height:2px;overflow:hidden;opacity:.01;pointer-events:none';
+document.body.append(vbox);
+function syncMedia() {
+  for (const sc of P.scenes) {
+    const old = imgs[sc.id];
+    if (sc.kind === 'video') {
+      if (old?._blob === sc.video) continue;
+      const v = document.createElement('video');
+      Object.assign(v, { muted: true, playsInline: true, preload: 'auto', _blob: sc.video, src: URL.createObjectURL(sc.video) });
+      v.onloadeddata = v.onseeked = () => { if (!playing && !exporting) redraw(); };
+      vbox.append(v); old?.remove?.(); imgs[sc.id] = v;
+    } else if (old?.dataset?.src !== sc.image) {
+      const im = new Image();
+      im.dataset.src = sc.image; im.onload = redraw; im.src = sc.image;
+      old?.remove?.(); imgs[sc.id] = im;
+    }
   }
 }
+function activeScenes(time) {
+  if (mode === 'edit' && !exporting) return [[cur, 0]];
+  const { i, u } = sceneAt(P, time), sc = P.scenes[i], out = [[i, u]];
+  if (i > 0 && sc.trans !== 'cut' && u < (sc.transDur || .6)) out.push([i - 1, P.scenes[i - 1].dur + u]);
+  return out;
+}
+const videoTime = (sc, u, v) => Math.max(0, Math.min((sc.trim || 0) + u, (v.duration || 1e9) - .05));
+function syncVideos() {
+  const act = new Map(activeScenes(t));
+  P.scenes.forEach((sc, i) => {
+    const v = imgs[sc.id];
+    if (sc.kind !== 'video' || !v) return;
+    if (!act.has(i)) { if (!v.paused) v.pause(); return; }
+    const target = videoTime(sc, act.get(i), v);
+    if (playing) { if (v.paused) v.play().catch(() => {}); if (Math.abs(v.currentTime - target) > .3) v.currentTime = target; }
+    else { if (!v.paused) v.pause(); if (Math.abs(v.currentTime - target) > .03) v.currentTime = target; }
+  });
+}
+// Khi xuất: tua video đến đúng khung rồi chờ trình duyệt dựng xong khung đó
+async function seekVideos(time) {
+  await Promise.all(activeScenes(time).map(([i, u]) => {
+    const sc = P.scenes[i], v = imgs[sc.id];
+    if (sc.kind !== 'video' || !v) return;
+    const target = videoTime(sc, u, v);
+    if (Math.abs(v.currentTime - target) < 1e-3) return;
+    return new Promise(res => {
+      let done = false;
+      const fin = () => { if (!done) { done = true; res(); } };
+      v.requestVideoFrameCallback?.(fin);
+      v.addEventListener('seeked', () => setTimeout(fin, 120), { once: true });
+      setTimeout(fin, 2000);
+      v.currentTime = target;
+    });
+  }));
+}
+
 function redraw() {
   if (stage.width !== P.w || stage.height !== P.h) { stage.width = P.w; stage.height = P.h; }
+  syncVideos();
   camM = drawFrame(ctx, P, t, imgs, { edit: mode === 'edit', scene: cur, selected: mode === 'edit' ? sel : null, draft });
   const { total } = timeline(P);
   $('clock').innerHTML = `${t.toFixed(1)} <small>/ ${total.toFixed(1)} s</small>`;
@@ -58,8 +110,9 @@ function redraw() {
   $('strip').querySelectorAll('.seg').forEach((s, i) => s.classList.toggle('on', i === cur));
   $('total').textContent = `${P.scenes.length} cảnh · ${total.toFixed(1)}s`;
 }
+setOnMediaLoad(() => { if (!playing && !exporting) redraw(); });
 function renderAll() {
-  syncImgs();
+  syncMedia();
   const has = P.scenes.length > 0;
   $('empty').hidden = has; $('tools').hidden = !has; $('hint').hidden = !has; stage.hidden = !has;
   document.querySelector('.modeSwitch').hidden = !has;
@@ -72,8 +125,8 @@ function renderScenes() {
   P.scenes.forEach((sc, i) => {
     const b = document.createElement('button');
     b.className = 'scene' + (i === cur ? ' on' : '');
-    b.innerHTML = `<img alt=""><div class="meta"><span></span><span>${sc.dur.toFixed(1)}s</span></div>`;
-    b.querySelector('img').src = sc.image;
+    b.innerHTML = `<img alt=""><div class="meta"><span></span><span>${sc.kind === 'video' ? '▶ ' : ''}${sc.dur.toFixed(1)}s</span></div>`;
+    b.querySelector('img').src = thumbOf(sc);
     b.querySelector('.meta span').textContent = sc.name;
     b.onclick = () => openScene(i);
     $('scenes').appendChild(b);
@@ -85,7 +138,7 @@ function renderStrip() {
   P.scenes.forEach((sc, i) => {
     const s = document.createElement('div');
     s.className = 'seg';
-    Object.assign(s.style, { left: `${starts[i] / total * 100}%`, width: `${sc.dur / total * 100}%`, backgroundImage: `url("${sc.image}")` });
+    Object.assign(s.style, { left: `${starts[i] / total * 100}%`, width: `${sc.dur / total * 100}%`, backgroundImage: `url("${thumbOf(sc)}")` });
     s.innerHTML = `<b></b>`; s.firstChild.textContent = sc.name;
     strip.insertBefore(s, $('head'));
     for (const L of sc.layers) {
@@ -98,36 +151,109 @@ function renderStrip() {
 }
 
 // ---------- Bảng thuộc tính
+// Mỗi trường: [khoá, nhãn, kiểu, min|danh sách chọn, max, bước, điều kiện hiện]; ['#', 'Tên nhóm'] là tiêu đề nhóm
 const SCENE_FIELDS = [
-  ['name', 'Tên cảnh', 'text'], ['dur', 'Thời lượng (s)', 'num', 1, 60, .1],
+  ['name', 'Tên cảnh', 'text'], ['dur', 'Thời lượng (s)', 'num', 1, 120, .1],
+  ['trim', 'Video bắt đầu từ (s)', 'num', 0, 3600, .1, , , sc => sc.kind === 'video'],
   ['trans', 'Chuyển vào', 'select', TRANSITIONS], ['transDur', 'Độ dài chuyển (s)', 'range', .2, 1.5, .05],
+  ['#', 'Camera'],
   ['cam.zoom', 'Đẩy camera', 'range', 0, .4, .01], ['cam.dx', 'Trôi ngang', 'range', -300, 300, 1], ['cam.dy', 'Trôi dọc', 'range', -300, 300, 1],
   ['cam.rot', 'Xoay (°)', 'range', -6, 6, .1],
+  ['#', 'Màu ảnh'],
   ['look.bright', 'Độ sáng', 'range', .5, 1.5, .01], ['look.contrast', 'Tương phản', 'range', .5, 1.6, .01], ['look.sat', 'Độ đậm màu', 'range', 0, 2, .01],
 ];
-const AT = ['at', 'Bắt đầu sau (s)', 'num', 0, 60, .05];
+const TIME = [['#', 'Thời gian'], ['at', 'Bắt đầu sau (s)', 'num', 0, 120, .05], ['end', 'Ẩn sau (s) · 0 = giữ đến hết', 'num', 0, 120, .1], ['opacity', 'Độ trong suốt', 'range', .05, 1, .01]];
+const notDot = L => L.style !== 'dot';
 const LAYER_FIELDS = {
-  pin: [AT, ['label', 'Mã lô / chữ', 'text'], ['labelAt', 'Chữ hiện sau (s)', 'num', 0, 10, .1], ['size', 'Cỡ ghim', 'range', .5, 3, .05], ['badge', 'Màu lõi ghim', 'color'], ['focus', 'Làm tối xung quanh', 'check']],
-  route: [AT, ['dur', 'Thời gian chạy (s)', 'num', .2, 10, .1], ['color', 'Màu tia sáng', 'color'], ['width', 'Độ dày', 'range', .4, 3, .05]],
-  callout: [AT, ['text', 'Nội dung', 'text'], ['stem', 'Độ dài chân', 'range', 0, 320, 1], ['color', 'Màu nhãn', 'color']],
-  highlight: [AT, ['color', 'Màu tô', 'color'], ['blink', 'Nháy khi hiện', 'check']],
-  tag: [AT, ['title', 'Tiêu đề', 'text'], ['rowsText', 'Dòng số liệu', 'area'], ['rot', 'Độ nghiêng (°)', 'range', -30, 30, .5]],
-  ptext: [AT, ['text', 'Nội dung', 'area'], ['style', 'Kiểu chữ', 'select', [['road', 'Tên đường (vàng)'], ['water', 'Trên mặt nước'], ['white', 'Trắng đậm']]]],
+  pin: [
+    ['#', 'Ghim'], ['style', 'Kiểu ghim', 'select', [['pin', 'Ghim giọt nước'], ['dot', 'Chấm nhấp nháy']]], ['pinColor', 'Màu ghim', 'color'], ['size', 'Cỡ ghim', 'range', .5, 3, .05],
+    ['icon', 'Biểu tượng lõi', 'select', [['house', 'Ngôi nhà'], ['building', 'Toà nhà'], ['star', 'Ngôi sao'], ['text', 'Chữ / số'], ['image', 'Logo tải lên']], , , notDot],
+    ['iconText', 'Chữ trong lõi', 'text', , , , L => notDot(L) && L.icon === 'text'], ['iconImg', 'Logo lõi ghim', 'file', , , , L => notDot(L) && L.icon === 'image'],
+    ['badge', 'Màu lõi', 'color', , , , notDot],
+    ['#', 'Hiệu ứng'], ['drop', 'Rơi từ trên xuống', 'check'], ['beam', 'Tia sáng chiếu xuống', 'check'], ['flare', 'Quầng sáng chân ghim', 'check'],
+    ['rings', 'Vòng sóng lan', 'check'], ['ringColor', 'Màu vòng sóng', 'color', , , , L => L.rings !== false], ['focus', 'Làm tối xung quanh', 'check'],
+    ['#', 'Chữ trên ghim (mã lô)'], ['label', 'Nội dung', 'text'], ['labelAt', 'Hiện sau (s)', 'num', 0, 10, .1],
+    ['labelPos', 'Vị trí', 'select', [['above', 'Trên ghim'], ['below', 'Dưới ghim'], ['right', 'Bên phải']]], ['labelSize', 'Cỡ chữ', 'range', 30, 180, 1],
+    ['labelStyle', 'Màu chữ', 'select', [['gold', 'Vàng kim'], ['white', 'Trắng'], ['color', 'Màu tự chọn']]], ['labelColor', 'Chọn màu', 'color', , , , L => L.labelStyle === 'color'],
+  ],
+  route: [
+    ['#', 'Tuyến'], ['color', 'Màu tia sáng', 'color'], ['coreColor', 'Màu lõi', 'color'], ['width', 'Độ dày', 'range', .4, 3, .05], ['glow', 'Độ toả sáng', 'range', 0, 2, .05],
+    ['line', 'Kiểu nét', 'select', [['solid', 'Liền'], ['dash', 'Nét đứt chạy'], ['dots', 'Chấm tròn']]],
+    ['#', 'Chuyển động'], ['reveal', 'Cách hiện', 'select', [['draw', 'Vẽ dần theo đường'], ['show', 'Hiện cả tuyến']]],
+    ['dur', 'Thời gian vẽ (s)', 'num', .2, 20, .1, L => L.reveal !== 'show'], ['particles', 'Hạt sáng chạy', 'check'], ['speed', 'Tốc độ chạy', 'range', .2, 3, .05],
+    ['#', 'Phương tiện'],
+    ['vehicle', 'Chạy theo tuyến', 'select', [['none', 'Không'], ['dot', 'Chấm sáng'], ['car', 'Ô tô 🚗'], ['bus', 'Xe buýt 🚌'], ['train', 'Tàu điện 🚆'], ['plane', 'Máy bay ✈️'], ['boat', 'Ca nô 🛥️'], ['bike', 'Xe máy 🛵']]],
+    ['vehicleSize', 'Cỡ phương tiện', 'range', .4, 3, .05, L => !['none', 'dot', undefined].includes(L.vehicle)], ['loop', 'Chạy lặp sau khi đến nơi', 'check', , , , L => L.vehicle && L.vehicle !== 'none'],
+  ],
+  callout: [
+    ['#', 'Nhãn'], ['text', 'Nội dung', 'text'], ['icon', 'Biểu tượng đầu (emoji)', 'text'],
+    ['style', 'Kiểu nhãn', 'select', [['green', 'Viên màu (tự chọn màu)'], ['dark', 'Nền tối chữ vàng'], ['glass', 'Trắng mờ'], ['gold', 'Vàng kim']]],
+    ['color', 'Màu nhãn', 'color', , , , L => (L.style || 'green') === 'green'], ['textColor', 'Màu chữ', 'color'], ['fontSize', 'Cỡ chữ', 'range', 14, 56, 1], ['square', 'Góc vuông', 'check'],
+    ['#', 'Chân & hiệu ứng'], ['dir', 'Nhãn nằm', 'select', [['up', 'Phía trên điểm'], ['down', 'Phía dưới điểm']]], ['stem', 'Độ dài chân', 'range', 0, 320, 1],
+    ['anim', 'Kiểu hiện', 'select', [['pop', 'Bật nảy'], ['slide', 'Trượt vào'], ['fade', 'Mờ dần']]],
+  ],
+  highlight: [
+    ['#', 'Tô khối'], ['style', 'Kiểu', 'select', [['fill', 'Tô đặc'], ['outline', 'Viền phát sáng'], ['both', 'Tô + viền']]],
+    ['color', 'Màu tô', 'color', , , , L => L.style !== 'outline'], ['strength', 'Độ đậm', 'range', .1, 1, .01, L => L.style !== 'outline'],
+    ['lineColor', 'Màu viền', 'color', , , , L => (L.style || 'fill') !== 'fill'], ['lineWidth', 'Độ dày viền', 'range', 1, 24, 1, L => (L.style || 'fill') !== 'fill'],
+    ['#', 'Hiệu ứng'], ['blinks', 'Số lần nháy', 'range', 0, 6, 1], ['pulse', 'Nhịp sáng liên tục', 'check'],
+  ],
+  tag: [
+    ['#', 'Tiêu đề'], ['title', 'Nội dung', 'text'],
+    ['titleStyle', 'Màu', 'select', [['lime', 'Xanh chanh'], ['gold', 'Vàng kim'], ['white', 'Trắng'], ['color', 'Màu tự chọn']]], ['titleColor', 'Chọn màu', 'color', , , , L => L.titleStyle === 'color'],
+    ['titleSize', 'Cỡ chữ', 'range', 40, 180, 1], ['titleAnim', 'Kiểu hiện', 'select', [['pop', 'Bật từng chữ'], ['type', 'Gõ chữ'], ['fade', 'Mờ dần']]],
+    ['#', 'Số liệu'], ['rowsText', 'Các dòng', 'area'], ['numSize', 'Cỡ số', 'range', 30, 140, 1], ['rowColor', 'Màu số', 'color'], ['count', 'Số chạy đếm lên', 'check'],
+    ['#', 'Bố cục'], ['align', 'Căn theo', 'select', [['right', 'Mép phải (điểm đặt)'], ['left', 'Mép trái (điểm đặt)']]], ['rot', 'Độ nghiêng (°)', 'range', -30, 30, .5],
+  ],
+  ptext: [
+    ['#', 'Chữ'], ['text', 'Nội dung', 'area'], ['style', 'Kiểu có sẵn', 'select', [['road', 'Tên đường (vàng)'], ['water', 'Trên mặt nước'], ['white', 'Trắng đậm']]],
+    ['color', 'Màu chữ', 'color'], ['weight', 'Độ đậm', 'select', [['', 'Theo kiểu'], ['600', 'Vừa'], ['800', 'Đậm'], ['900', 'Rất đậm']]],
+    ['glow', 'Độ phát sáng', 'range', 0, 60, 1], ['blend', 'Hoà màu', 'select', [['', 'Theo kiểu'], ['normal', 'Bình thường'], ['screen', 'Hoà sáng (hợp mặt nước)']]],
+    ['anim', 'Kiểu hiện', 'select', [['', 'Theo kiểu'], ['spread', 'Giãn rồi thu'], ['chars', 'Hiện từng ký tự'], ['fade', 'Mờ dần']]],
+  ],
+  image: [
+    ['#', 'Ảnh'], ['src', 'Tệp ảnh', 'file'], ['w', 'Chiều rộng (px)', 'range', 40, 1920, 1], ['rot', 'Xoay (°)', 'range', -45, 45, .5],
+    ['frame', 'Khung', 'select', [['none', 'Không khung (giữ nền trong suốt)'], ['round', 'Bo góc'], ['white', 'Viền trắng kiểu ảnh in'], ['circle', 'Hình tròn']]],
+    ['radius', 'Độ bo góc', 'range', 0, 160, 1, L => L.frame === 'round'], ['border', 'Viền (px)', 'range', 0, 20, 1, L => (L.frame || 'none') !== 'none'],
+    ['borderColor', 'Màu viền', 'color', , , , L => L.border > 0], ['shadow', 'Bóng đổ', 'check'],
+    ['#', 'Chuyển động'], ['anim', 'Kiểu hiện', 'select', [['fade', 'Mờ dần'], ['zoom', 'Phóng to dần'], ['slide', 'Trượt lên'], ['pop', 'Bật nảy']]],
+    ['float', 'Nhấp nhô nhẹ', 'check'], ['screen', 'Cố định trên màn hình (không theo camera)', 'check'],
+  ],
 };
+// Giá trị mặc định để ô nhập hiển thị đúng khi lớp chưa đặt giá trị (bộ vẽ cũng dùng đúng các mặc định này)
+const DEF = {
+  transDur: .6, 'cam.zoom': 0, 'cam.dx': 0, 'cam.dy': 0, 'cam.rot': 0, 'look.bright': 1, 'look.contrast': 1, 'look.sat': 1, trim: 0, end: 0, opacity: 1,
+  'pin:style': 'pin', 'pin:pinColor': '#E9B23C', 'pin:icon': 'house', 'pin:badge': '#0F7A45', 'pin:drop': true, 'pin:beam': true, 'pin:flare': true, 'pin:rings': true,
+  'pin:ringColor': '#FFE08A', 'pin:focus': false, 'pin:labelPos': 'above', 'pin:labelSize': 92, 'pin:labelStyle': 'gold', 'pin:labelColor': '#FFFFFF',
+  'route:coreColor': '#E9FDFF', 'route:glow': 1, 'route:line': 'solid', 'route:reveal': 'draw', 'route:particles': true, 'route:speed': 1, 'route:vehicle': 'none', 'route:vehicleSize': 1, 'route:loop': false,
+  'callout:style': 'green', 'callout:color': '#2BD47A', 'callout:textColor': '#FFFFFF', 'callout:fontSize': 22, 'callout:square': false, 'callout:dir': 'up', 'callout:stem': 90, 'callout:anim': 'pop',
+  'highlight:style': 'fill', 'highlight:strength': .9, 'highlight:lineColor': '#FFF27A', 'highlight:lineWidth': 6, 'highlight:blinks': 2, 'highlight:pulse': false,
+  'tag:titleStyle': 'lime', 'tag:titleColor': '#FFFFFF', 'tag:titleSize': 96, 'tag:titleAnim': 'pop', 'tag:numSize': 78, 'tag:rowColor': '#FFFFFF', 'tag:count': true, 'tag:align': 'right', 'tag:rot': -9,
+  'ptext:color': '#FFE34D', 'ptext:weight': '', 'ptext:glow': 24, 'ptext:blend': '', 'ptext:anim': '',
+  'image:w': 360, 'image:rot': 0, 'image:frame': 'none', 'image:radius': 24, 'image:border': 0, 'image:borderColor': '#FFFFFF', 'image:shadow': true, 'image:anim': 'fade', 'image:float': false, 'image:screen': false,
+};
+const defOf = (o, k) => DEF[`${o.type}:${k}`] ?? DEF[k];
 const getK = (o, k) => k === 'rowsText' ? (o.rows || []).map(r => [r.label, r.value, r.unit].join(' | ')).join('\n') : k.split('.').reduce((a, x) => a?.[x], o);
 function setK(o, k, v) {
   if (k === 'rowsText') { o.rows = v.split('\n').filter(Boolean).map(l => { const [label = '', value = '0', unit = ''] = l.split('|').map(s => s.trim()); return { label, value: parseFloat(value.replace(',', '.')) || 0, unit }; }); return; }
   const ks = k.split('.'), last = ks.pop();
   ks.reduce((a, x) => a[x] ||= {}, o)[last] = v;
 }
-const DEF = { transDur: .6, badge: '#0F7A45', 'cam.zoom': 0, 'cam.dx': 0, 'cam.dy': 0, 'cam.rot': 0, 'look.bright': 1, 'look.contrast': 1, 'look.sat': 1 };
 function form(obj, defs) {
   const box = document.createElement('div');
-  for (const [k, label, kind, a, b, step] of defs) {
+  for (const [k, label, kind, a, b, step, show] of defs) {
+    if (show && !show(obj)) continue;
+    if (k === '#') { const h = document.createElement('div'); h.className = 'group'; h.textContent = label; box.appendChild(h); continue; }
     const row = document.createElement('label');
     row.className = 'field';
     row.innerHTML = `<span>${label}</span>`;
-    let input, val = getK(obj, k) ?? DEF[k];
+    let input, val = getK(obj, k) ?? defOf(obj, k);
+    if (kind === 'file') {
+      const wrap = document.createElement('div'); wrap.className = 'row';
+      wrap.append(btn(val ? 'Đổi ảnh…' : 'Chọn ảnh…', () => pickFile('image/*', async f => { setK(obj, k, await fileToDataURL(f, { alpha: true, max: 1600 })); save(); renderInspector(); redraw(); })));
+      if (val && k !== 'src') wrap.append(btn('Bỏ', () => { setK(obj, k, ''); save(); renderInspector(); redraw(); }, 'ghost'));
+      row.appendChild(wrap); box.appendChild(row); continue;
+    }
     if (kind === 'select') {
       input = document.createElement('select');
       for (const [v, l] of a) input.add(new Option(l, v, false, v === val));
@@ -138,7 +264,7 @@ function form(obj, defs) {
       input = document.createElement('input');
       input.type = { num: 'number', range: 'range', color: 'color', check: 'checkbox' }[kind] || 'text';
       if (a !== undefined) { input.min = a; input.max = b; input.step = step; }
-      if (kind === 'check') input.checked = val !== false && !!(val ?? true); else input.value = val ?? (kind === 'color' ? '#ffffff' : '');
+      if (kind === 'check') input.checked = !!val; else input.value = val ?? (kind === 'color' ? '#ffffff' : '');
     }
     let out;
     if (kind === 'range') {
@@ -153,6 +279,8 @@ function form(obj, defs) {
       if (out) out.textContent = v;
       save(); redraw();
       if (k === 'dur' || k === 'at' || k === 'name') { renderStrip(); renderScenes(); }
+      // các ô phụ thuộc (vd. chọn "Màu tự chọn" mới hiện ô chọn màu) cần dựng lại bảng
+      if (kind === 'select' || kind === 'check') renderInspector();
     });
     box.appendChild(row);
   }
@@ -168,11 +296,11 @@ function armed(b, label, fn) {
     b._t = setTimeout(() => { delete b.dataset.armed; b.textContent = old; b.classList.remove('armed'); }, 3000);
   };
 }
-const btn = (text, fn, cls = '') => { const b = document.createElement('button'); b.textContent = text; b.onclick = fn; if (cls) b.className = cls; return b; };
+const btn = (text, fn, cls = '') => { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.onclick = fn; if (cls) b.className = cls; return b; };
 const layerLabel = L => (L.label || L.text || L.title || NAME[L.type]).split('\n')[0].slice(0, 22);
 
 function renderInspector() {
-  const box = $('inspector');
+  const box = $('inspector'), keep = box.scrollTop;
   box.innerHTML = '';
   const sc = scene();
   if (!sc) { box.innerHTML = '<div class="eyebrow">Thuộc tính</div><p style="color:var(--mute);margin-top:10px">Chưa có cảnh nào.</p>'; return; }
@@ -181,20 +309,22 @@ function renderInspector() {
     top.append(btn(`← ${sc.name}`, () => select(null), 'ghost'));
     box.append(top);
     const h = document.createElement('h3'); h.textContent = NAME[sel.type]; h.style.color = COLOR[sel.type];
-    box.append(h, form(sel, LAYER_FIELDS[sel.type]));
+    box.append(h, form(sel, [...LAYER_FIELDS[sel.type], ...TIME]));
     const i = sc.layers.indexOf(sel), row = document.createElement('div'); row.className = 'row';
     row.append(
       btn(sel.hidden ? 'Hiện lớp' : 'Ẩn lớp', () => { sel.hidden = !sel.hidden; save(); renderInspector(); redraw(); }),
+      btn('Nhân đôi', () => { const c = structuredClone(sel); handles(c).forEach((h, j) => setHandle(c, j, [h[0] + 40, h[1] + 40])); add(c); }),
       btn('Đưa lên', () => moveLayer(i, 1)), btn('Đưa xuống', () => moveLayer(i, -1)),
       btn('Xoá lớp', deleteSel, 'danger'));
     box.append(document.createElement('hr'), row);
+    box.scrollTop = keep;
     return;
   }
-  const eb = document.createElement('div'); eb.className = 'eyebrow'; eb.textContent = 'Cảnh';
+  const eb = document.createElement('div'); eb.className = 'eyebrow'; eb.textContent = sc.kind === 'video' ? 'Cảnh · video' : 'Cảnh · ảnh';
   box.append(eb, form(sc, SCENE_FIELDS));
   const r = document.createElement('div'); r.className = 'row';
   if (cur > 0) r.append(btn('▶ Xem thử chuyển cảnh', previewTrans));
-  r.append(btn('Đổi ảnh', () => { replacing = true; $('imgInput').multiple = false; $('imgInput').click(); }),
+  r.append(btn('Đổi ảnh / video', () => { replacing = true; $('imgInput').multiple = false; $('imgInput').click(); }),
     btn('↑', () => moveScene(-1)), btn('↓', () => moveScene(1)));
   const del = btn('Xoá cảnh', null, 'danger'); del.onclick = armed(del, 'Bấm lần nữa để xoá', deleteScene); r.append(del);
   box.append(r, document.createElement('hr'));
@@ -208,6 +338,7 @@ function renderInspector() {
   });
   if (!sc.layers.length) list.innerHTML = '<p style="color:var(--mute)">Chọn một công cụ bên trái khung xem rồi bấm lên ảnh.</p>';
   box.append(le, list);
+  box.scrollTop = keep;
 }
 
 // ---------- Thao tác
@@ -216,8 +347,8 @@ function openScene(i) {
   t = timeline(P).starts[i] || 0;
   setMode('edit'); renderScenes(); renderInspector(); redraw();
 }
-function select(L) { sel = L; renderInspector(); redraw(); }
-function add(L) { scene().layers.push(L); sel = L; save(); renderInspector(); renderStrip(); redraw(); }
+function select(L) { sel = L; $('inspector').scrollTop = 0; renderInspector(); redraw(); }
+function add(L) { scene().layers.push(L); sel = L; save(); $('inspector').scrollTop = 0; renderInspector(); renderStrip(); redraw(); }
 function deleteSel() {
   if (!sel) return;
   const ls = scene().layers; ls.splice(ls.indexOf(sel), 1); sel = null;
@@ -240,7 +371,7 @@ function deleteScene() {
 }
 function finishDraft() {
   if (tool === 'route' && draft.length >= 2) add({ type: 'route', pts: draft, color: '#41E8FF', width: 1, at: .3, dur: 1.2 });
-  else if (tool === 'highlight' && draft.length >= 3) add({ type: 'highlight', pts: draft, color: '#FFE600', blink: true, at: 0 });
+  else if (tool === 'highlight' && draft.length >= 3) add({ type: 'highlight', pts: draft, color: '#FFE600', blinks: 2, at: 0 });
   draft = []; redraw();
 }
 function setTool(name) {
@@ -271,11 +402,12 @@ function inPoly(pts, [x, y]) {
   return ins;
 }
 function hit(L, p, tol) {
-  const hs = handles(L), [x, y] = p;
+  const hs = handles(L), [x, y] = p, s = L.size || 1.3;
   if (hs.some(h => near(h, p, tol))) return true;
-  if (L.type === 'pin') return Math.abs(x - L.x) < 50 * (L.size || 1.3) && y < L.y + 10 && y > L.y - 130 * (L.size || 1.3);
-  if (L.type === 'callout') return Math.abs(x - L.x) < 130 && y < L.y && y > L.y - (L.stem ?? 90) - 50;
-  if (L.type === 'tag') return x < L.x + 20 && x > L.x - 560 && y > L.y - 110 && y < L.y + 200;
+  if (L.type === 'pin') return Math.abs(x - L.x) < 50 * s && y < L.y + 10 && y > L.y - 130 * s;
+  if (L.type === 'callout') { const st = L.stem ?? 90, f = (L.fontSize || 22) / 22; return Math.abs(x - L.x) < 140 * f && (L.dir === 'down' ? y > L.y && y < L.y + st + 50 * f : y < L.y && y > L.y - st - 50 * f); }
+  if (L.type === 'tag') { const f = (L.titleSize || 96) / 96; return (L.align === 'left' ? x > L.x - 20 && x < L.x + 560 * f : x < L.x + 20 && x > L.x - 560 * f) && y > L.y - 110 * f && y < L.y + 200 * f; }
+  if (L.type === 'image') { const [w, h] = imageBox(L); return Math.abs(x - L.x) < w / 2 && Math.abs(y - L.y) < h / 2; }
   if (L.type === 'route') return hs.some((h, i) => i && segDist(hs[i - 1], h, p) < tol);
   return inPoly(hs, p);
 }
@@ -284,7 +416,10 @@ function segDist(a, b, p) {
   return Math.hypot(p[0] - a[0] - k * dx, p[1] - a[1] - k * dy);
 }
 function setHandle(L, i, [x, y]) {
-  if (L.pts) L.pts[i] = [x, y]; else if (L.quad) L.quad[i] = [x, y]; else { L.x = x; L.y = y; }
+  if (L.pts) L.pts[i] = [x, y];
+  else if (L.quad) L.quad[i] = [x, y];
+  else if (L.type === 'image' && i === 1) L.w = Math.max(40, Math.round(2 * Math.abs(x - L.x)));
+  else { L.x = x; L.y = y; }
 }
 
 stage.addEventListener('pointerdown', e => {
@@ -295,6 +430,9 @@ stage.addEventListener('pointerdown', e => {
     case 'pin': return add({ type: 'pin', x: p[0], y: p[1], size: 1.3, at: .3, label: '', labelAt: 1, focus: false });
     case 'callout': return add({ type: 'callout', x: p[0], y: p[1], text: 'TIỆN ÍCH', stem: 90, color: '#2BD47A', at: .5 + .35 * sc.layers.filter(l => l.type === 'callout').length });
     case 'tag': return add({ type: 'tag', x: p[0], y: p[1], rot: -9, title: 'LIỀN KỀ GÓC', rows: [{ label: 'DT đất', value: 109.3, unit: 'm²' }, { label: 'DTXD', value: 323.2, unit: 'm²' }], at: .5 });
+    case 'image':
+      imgAt = p;
+      return pickFile('image/*', async f => add({ type: 'image', x: imgAt[0], y: imgAt[1], w: 360, src: await fileToDataURL(f, { alpha: true, max: 1600 }), frame: 'none', at: .4 }));
     case 'focus':
       sc.cam = { ...sc.cam, ox: p[0], oy: p[1] }; save(); setTool('select'); return;
     case 'route': case 'highlight':
@@ -375,49 +513,81 @@ function previewTrans() {
   const watch = () => { if (!playing) return; if (t >= end) { stop(); setMode('view'); } else requestAnimationFrame(watch); };
   requestAnimationFrame(watch);
 }
-function stop() { playing = false; $('play').textContent = '▶'; $('play').setAttribute('aria-label', 'Phát'); }
+function stop() {
+  playing = false; $('play').textContent = '▶'; $('play').setAttribute('aria-label', 'Phát');
+  Object.values(imgs).forEach(v => v.pause?.());
+}
 $('play').onclick = () => playing ? stop() : play();
 
-// ---------- Ảnh, tệp dự án
-async function fileToDataURL(f) {
+// ---------- Ảnh, video, tệp dự án
+function pickFile(accept, fn) {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = accept;
+  inp.onchange = () => inp.files[0] && fn(inp.files[0]);
+  inp.click();
+}
+// Thu nhỏ ảnh quá lớn để dự án nhẹ; ảnh có nền trong suốt (PNG/WebP/SVG) giữ định dạng PNG
+async function fileToDataURL(f, { alpha = false, max = 3840 } = {}) {
   const url = URL.createObjectURL(f);
-  const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
-  const s = Math.min(1, 3840 / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement('canvas');
+  const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Không đọc được tệp ảnh này.')); i.src = url; });
+  const s = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement('canvas');
   c.width = Math.round(im.naturalWidth * s); c.height = Math.round(im.naturalHeight * s);
   c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
   URL.revokeObjectURL(url);
-  return c.toDataURL('image/jpeg', .92);
+  return alpha && f.type !== 'image/jpeg' ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', .92);
+}
+async function videoInfo(f) {
+  const url = URL.createObjectURL(f), v = document.createElement('video');
+  v.muted = true; v.preload = 'auto'; v.src = url;
+  await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = () => rej(new Error(`Trình duyệt không đọc được video "${f.name}". Hãy dùng MP4 (H.264) hoặc WebM.`)); });
+  v.currentTime = Math.min(.2, v.duration / 2);
+  await new Promise(r => { v.onseeked = r; });
+  const c = document.createElement('canvas');
+  c.width = 480; c.height = Math.round(480 * v.videoHeight / v.videoWidth);
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  URL.revokeObjectURL(url);
+  return { kind: 'video', video: f, thumb: c.toDataURL('image/jpeg', .8), trim: 0, dur: Math.max(1, Math.min(30, Math.round(v.duration * 10) / 10)) };
+}
+async function mediaScene(f) {
+  if (f.type.startsWith('video/')) return videoInfo(f);
+  return { kind: 'image', image: await fileToDataURL(f), video: undefined, thumb: undefined };
 }
 $('imgInput').addEventListener('change', async e => {
-  const files = [...e.target.files].filter(f => f.type.startsWith('image/'));
+  const files = [...e.target.files].filter(f => /^(image|video)\//.test(f.type));
   e.target.value = '';
   if (!files.length) return;
-  if (replacing) { replacing = false; scene().image = await fileToDataURL(files[0]); }
-  else for (const f of files) {
-    P.scenes.push({ id: uid(), name: f.name.replace(/\.[^.]+$/, '').slice(0, 24), image: await fileToDataURL(f), dur: 4, trans: P.scenes.length ? 'fade' : 'cut', cam: { zoom: .08 }, look: {}, layers: [] });
-    cur = P.scenes.length - 1;
-  }
+  try {
+    if (replacing) { replacing = false; Object.assign(scene(), await mediaScene(files[0])); }
+    else for (const f of files) {
+      P.scenes.push({ id: uid(), name: f.name.replace(/\.[^.]+$/, '').slice(0, 24), dur: 4, trans: P.scenes.length ? 'fade' : 'cut', cam: { zoom: .08 }, look: {}, layers: [], ...await mediaScene(f) });
+      cur = P.scenes.length - 1;
+    }
+  } catch (err) { alert(err.message); }
   sel = null; save(); renderAll(); openScene(cur);
 });
 const pickImages = () => { replacing = false; $('imgInput').multiple = true; $('imgInput').click(); };
 $('addScene').onclick = pickImages; $('emptyAdd').onclick = pickImages;
 
-function load(data) {
+const blobToDataURL = b => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); });
+async function load(data) {
   if (!Array.isArray(data?.scenes)) throw new Error('Tệp này không phải dự án Phối Cảnh Studio.');
+  // video trong tệp .json được lưu dạng chuỗi; đổi lại thành Blob để phát và lưu trong trình duyệt
+  for (const sc of data.scenes) if (typeof sc.video === 'string') sc.video = await (await fetch(sc.video)).blob();
   P = { w: 1920, h: 1080, fps: 30, ...data }; cur = 0; sel = null; t = 0; draft = [];
   save(); renderAll(); openScene(0);
 }
 $('demoBtn').onclick = async () => load(await (await fetch('demo.json')).json());
-$('saveBtn').onclick = () => {
+$('saveBtn').onclick = async () => {
+  const data = { ...P, scenes: await Promise.all(P.scenes.map(async sc => sc.video instanceof Blob ? { ...sc, video: await blobToDataURL(sc.video) } : sc)) };
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(P)], { type: 'application/json' }));
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
   a.download = `${scene()?.name || 'du-an'}.json`; a.click(); URL.revokeObjectURL(a.href);
 };
 $('openBtn').onclick = () => $('jsonInput').click();
 $('jsonInput').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f) return;
-  try { load(JSON.parse(await f.text())); } catch (err) { alert(`Không mở được tệp: ${err.message}`); }
+  try { await load(JSON.parse(await f.text())); } catch (err) { alert(`Không mở được tệp: ${err.message}`); }
 });
 $('newBtn').onclick = armed($('newBtn'), 'Bấm lần nữa: bỏ dự án đang mở', () => {
   P = { w: P.w, h: P.h, fps: P.fps, scenes: [] }; cur = 0; sel = null; t = 0; save(); renderAll();
@@ -439,7 +609,7 @@ $('exportBtn').onclick = async () => {
   b.textContent = 'Đang chuẩn bị…';
   try {
     const { Muxer, ArrayBufferTarget } = await import('https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.1/build/mp4-muxer.mjs');
-    await Promise.all([...Object.values(imgs).map(i => i.decode().catch(() => {})), ...['600', '800', '900'].map(w => document.fonts.load(`${w} 40px ${FONT}`))]);
+    await Promise.all([...Object.values(imgs).map(i => i.decode?.().catch(() => {})), preloadMedia(P), ...['600', '800', '900'].map(w => document.fonts.load(`${w} 40px ${FONT}`))]);
     let cfg;
     for (const codec of ['avc1.64002A', 'avc1.4D402A', 'avc1.42002A']) {
       const c = { codec, width: W, height: H, bitrate: fps > 30 ? 16e6 : 12e6, framerate: fps };
@@ -455,6 +625,7 @@ $('exportBtn').onclick = async () => {
     for (let f = 0; f < n; f++) {
       if (exporting.cancel) throw new Error('cancel');
       if (fail) throw fail;
+      await seekVideos(f / fps);
       drawFrame(c2, P, f / fps, imgs);
       const frame = new VideoFrame(cv, { timestamp: Math.round(f * 1e6 / fps), duration: Math.round(1e6 / fps) });
       enc.encode(frame, { keyFrame: f % (fps * 2) === 0 }); frame.close();
@@ -469,7 +640,7 @@ $('exportBtn').onclick = async () => {
   } catch (err) {
     if (err.message !== 'cancel') alert(`Xuất video không thành công: ${err.message}`);
   } finally {
-    exporting = null; b.textContent = 'Xuất MP4';
+    exporting = null; b.textContent = 'Xuất MP4'; redraw();
   }
 };
 

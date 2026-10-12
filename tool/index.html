@@ -68,6 +68,9 @@ main{position:relative;display:flex;align-items:center;justify-content:center;ba
 .field input[type=color]{width:100%;height:30px;border:1px solid var(--line);border-radius:7px;background:var(--ink);padding:2px}
 .field .val{font:500 11px var(--mono);color:var(--mute);text-align:right}
 .rangeRow{display:grid;grid-template-columns:1fr 44px;gap:6px;align-items:center}
+.group{font:700 10.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--gold);margin:16px 0 8px;padding-top:12px;border-top:1px solid var(--line)}
+.group:first-child{border-top:0;padding-top:0;margin-top:4px}
+.field .row button{padding:5px 10px}
 .layers{display:flex;flex-direction:column;gap:4px;margin:6px 0 14px}
 .layer{display:grid;grid-template-columns:20px 1fr auto;gap:8px;align-items:center;text-align:left;padding:6px 8px;background:none}
 .layer i{width:10px;height:10px;border-radius:3px;justify-self:center}
@@ -112,7 +115,7 @@ footer{grid-column:1/-1;border-top:1px solid var(--line);background:var(--panel)
   <aside id="scenesPane">
     <div class="eyebrow">Cảnh <span id="total"></span></div>
     <div id="scenes" class="row" style="flex-direction:column"></div>
-    <button class="scene addScene" id="addScene">+ Thêm cảnh từ ảnh</button>
+    <button class="scene addScene" id="addScene">+ Thêm cảnh từ ảnh / video</button>
   </aside>
 
   <main>
@@ -125,14 +128,15 @@ footer{grid-column:1/-1;border-top:1px solid var(--line);background:var(--panel)
       <button data-tool="highlight" title="Tô khối (K)"><svg viewBox="0 0 34 22"><path d="M8 20 V8 L14 3 H26 V20Z" fill="#FFE600"/></svg>Tô khối</button>
       <button data-tool="tag" title="Thẻ thông số (S)"><svg viewBox="0 0 34 22"><text x="31" y="11" text-anchor="end" font-size="10" font-weight="900" fill="#C6E000" transform="rotate(-9 31 11)">ABC</text><text x="31" y="20" text-anchor="end" font-size="8" font-weight="800" fill="#fff" transform="rotate(-9 31 20)">109m²</text></svg>Thông số</button>
       <button data-tool="ptext" title="Chữ phối cảnh (P)"><svg viewBox="0 0 34 22"><path d="M8 5 L28 3 L32 18 L2 20Z" fill="none" stroke="#FFE34D" stroke-width="1" stroke-dasharray="2 2"/><text x="17" y="15" text-anchor="middle" font-size="8" font-weight="900" fill="#FFE34D" transform="skewX(-14) translate(3 0)">ĐƯỜNG</text></svg>Chữ nghiêng</button>
+      <button data-tool="image" title="Ảnh chèn (A)"><svg viewBox="0 0 34 22"><rect x="6" y="2" width="22" height="17" rx="3" fill="none" stroke="#B9C6FF" stroke-width="1.6"/><circle cx="13" cy="8" r="2.2" fill="#B9C6FF"/><path d="M8 17 L15 11 L19 14 L22 12 L26 17Z" fill="#B9C6FF"/></svg>Ảnh</button>
       <button data-tool="focus" title="Tâm camera (C)"><svg viewBox="0 0 34 22"><circle cx="17" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M17 1 V6 M17 16 V21 M7 11 H12 M22 11 H27" stroke="currentColor" stroke-width="1.6"/></svg>Tâm cam</button>
     </nav>
     <div class="modeSwitch" role="group" aria-label="Chế độ khung xem"><button id="editMode" class="on">Sửa</button><button id="viewMode">Xem</button></div>
     <div class="hint" id="hint"></div>
     <div class="empty" id="empty">
-      <h2>Bắt đầu từ một ảnh phối cảnh</h2>
-      <p>Thêm ảnh dự án, rồi đặt ghim, tuyến sáng và nhãn tiện ích lên ảnh.</p>
-      <div><button class="primary" id="emptyAdd">Thêm ảnh phối cảnh</button><button id="demoBtn">Mở dự án mẫu</button></div>
+      <h2>Bắt đầu từ ảnh phối cảnh hoặc video</h2>
+      <p>Thêm ảnh hoặc clip dự án, rồi đặt ghim, tuyến sáng, nhãn tiện ích và ảnh chèn lên trên.</p>
+      <div><button class="primary" id="emptyAdd">Thêm ảnh / video</button><button id="demoBtn">Mở dự án mẫu</button></div>
     </div>
   </main>
 
@@ -146,7 +150,7 @@ footer{grid-column:1/-1;border-top:1px solid var(--line);background:var(--panel)
     <div class="strip" id="strip"><div id="head"></div></div>
   </footer>
 </div>
-<input type="file" id="imgInput" accept="image/*" multiple hidden>
+<input type="file" id="imgInput" accept="image/*,video/mp4,video/webm,video/quicktime" multiple hidden>
 <input type="file" id="jsonInput" accept=".json,application/json" hidden>
 <script type="module" src="app.js"></script>
 </body>
