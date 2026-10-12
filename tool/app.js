@@ -1,9 +1,10 @@
-import { drawFrame, timeline, sceneAt, handles, imageBox, FONT, TRANSITIONS, setOnMediaLoad, preloadMedia } from './render.js';
+import { drawFrame, timeline, sceneAt, handles, imageBox, textBox, FONTS, FONT_SAMPLE, TRANSITIONS, setOnMediaLoad, preloadMedia } from './render.js';
+import { SFX, SFX_DEFAULT, playSfx, sfxCues, musicGain, mixAudio } from './audio.js';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), ctx = stage.getContext('2d');
-const COLOR = { pin: '#E9B23C', route: '#41E8FF', callout: '#2BD47A', highlight: '#FFE600', tag: '#C6E000', ptext: '#FFE34D', image: '#B9C6FF' };
-const NAME = { pin: 'Ghim', route: 'Tuyến sáng', callout: 'Nhãn', highlight: 'Tô khối', tag: 'Thông số', ptext: 'Chữ nghiêng', image: 'Ảnh chèn' };
+const COLOR = { pin: '#E9B23C', route: '#41E8FF', callout: '#2BD47A', highlight: '#FFE600', tag: '#C6E000', ptext: '#FFE34D', image: '#B9C6FF', text: '#F4F6FF' };
+const NAME = { pin: 'Ghim', route: 'Tuyến sáng', callout: 'Nhãn', highlight: 'Tô khối', tag: 'Thông số', ptext: 'Chữ nghiêng', image: 'Ảnh chèn', text: 'Chữ tiêu đề' };
 const HINT = {
   select: 'Bấm vào lớp để chọn · kéo <b>điểm</b> để sửa · giữ <b>Shift</b> khi kéo để dời cả lớp · <b>Delete</b> để xoá',
   pin: 'Bấm lên ảnh để đặt <b>ghim</b>',
@@ -13,12 +14,13 @@ const HINT = {
   tag: 'Bấm vào chỗ đặt <b>mép phải</b> của thẻ thông số',
   ptext: 'Bấm 4 góc mặt phẳng theo thứ tự <b>trái trên → phải trên → phải dưới → trái dưới</b>',
   image: 'Bấm vào chỗ muốn đặt ảnh rồi <b>chọn tệp ảnh</b> · kéo chấm góc để đổi cỡ',
+  text: 'Bấm vào chỗ đặt <b>chữ tiêu đề</b> (điểm bấm là mép trái dòng chữ lớn)',
   focus: 'Bấm vào điểm camera sẽ đẩy vào',
 };
-const KEYS = { v: 'select', g: 'pin', t: 'route', n: 'callout', k: 'highlight', s: 'tag', p: 'ptext', a: 'image', c: 'focus' };
+const KEYS = { v: 'select', g: 'pin', t: 'route', n: 'callout', k: 'highlight', s: 'tag', p: 'ptext', a: 'image', x: 'text', c: 'focus' };
 
 let P = { w: 1920, h: 1080, fps: 30, scenes: [] };
-let cur = 0, sel = null, tool = 'select', draft = [], mode = 'edit', t = 0, playing = false, camM = new DOMMatrix(), drag = null, replacing = false, exporting = null, imgAt = null;
+let panel = null, cur = 0, sel = null, tool = 'select', draft = [], mode = 'edit', t = 0, playing = false, camM = new DOMMatrix(), drag = null, replacing = false, exporting = null, imgAt = null;
 const imgs = {};
 const uid = () => Math.random().toString(36).slice(2, 9);
 const scene = () => P.scenes[cur];
@@ -39,8 +41,30 @@ async function idb(value) {
     q.onsuccess = () => res(q.result); q.onerror = () => res();
   });
 }
-let saveTimer;
-const save = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => idb(P), 400); };
+// Hoàn tác / Làm lại: chụp trạng thái dự án sau mỗi lần sửa (các thay đổi liên tiếp trong 0,4 giây gộp làm một).
+// Ảnh, video, nhạc (chuỗi dài, Blob) được giữ một bản dùng chung, ảnh chụp chỉ lưu mã tham chiếu nên rất nhẹ.
+const pool = new Map(), poolRev = new Map();
+const ref = v => { if (!poolRev.has(v)) { const id = `#${pool.size}`; pool.set(id, v); poolRev.set(v, id); } return poolRev.get(v); };
+const snap = () => JSON.stringify(P, (k, v) => v instanceof Blob || (typeof v === 'string' && v.length > 2000) ? { $ref: ref(v) } : v);
+const unsnap = str => JSON.parse(str, (k, v) => v && typeof v === 'object' && v.$ref ? pool.get(v.$ref) : v);
+let saveTimer = null, undoStack = [], redoStack = [], lastSnap = null;
+function commit() {
+  clearTimeout(saveTimer); saveTimer = null;
+  const now = snap();
+  if (lastSnap !== null && now !== lastSnap) { undoStack.push(lastSnap); if (undoStack.length > 100) undoStack.shift(); redoStack = []; }
+  lastSnap = now; idb(P); updateUndo();
+}
+const save = () => { clearTimeout(saveTimer); saveTimer = setTimeout(commit, 400); };
+const step = fn => { if (saveTimer) commit(); fn(); commit(); };
+function undoRedo(from, to) {
+  if (saveTimer) commit();
+  if (!from.length) return;
+  to.push(lastSnap); lastSnap = from.pop(); P = unsnap(lastSnap);
+  cur = Math.min(cur, Math.max(0, P.scenes.length - 1)); sel = null; draft = [];
+  idb(P); renderAll(); redraw(); updateUndo();
+}
+const undo = () => undoRedo(undoStack, redoStack), redo = () => undoRedo(redoStack, undoStack);
+function updateUndo() { $('undoBtn').disabled = !undoStack.length && !saveTimer; $('redoBtn').disabled = !redoStack.length; }
 
 // ---------- Ảnh / video nền của các cảnh
 // Video phải nằm trong trang (dù rất nhỏ) thì trình duyệt mới báo đúng lúc khung hình đã sẵn sàng sau khi tua
@@ -77,6 +101,7 @@ function syncVideos() {
     if (sc.kind !== 'video' || !v) return;
     if (!act.has(i)) { if (!v.paused) v.pause(); return; }
     const target = videoTime(sc, act.get(i), v);
+    v.muted = !(playing && sc.audio); v.volume = Math.min(1, sc.audioVol ?? 1);
     if (playing) { if (v.paused) v.play().catch(() => {}); if (Math.abs(v.currentTime - target) > .3) v.currentTime = target; }
     else { if (!v.paused) v.pause(); if (Math.abs(v.currentTime - target) > .03) v.currentTime = target; }
   });
@@ -155,6 +180,7 @@ function renderStrip() {
 const SCENE_FIELDS = [
   ['name', 'Tên cảnh', 'text'], ['dur', 'Thời lượng (s)', 'num', 1, 120, .1],
   ['trim', 'Video bắt đầu từ (s)', 'num', 0, 3600, .1, sc => sc.kind === 'video'],
+  ['audio', 'Giữ tiếng gốc của video', 'check', , , , sc => sc.kind === 'video'], ['audioVol', 'Âm lượng tiếng gốc', 'range', 0, 2, .05, sc => sc.kind === 'video' && sc.audio],
   ['trans', 'Chuyển vào', 'select', TRANSITIONS], ['transDur', 'Độ dài chuyển (s)', 'range', .2, 1.5, .05],
   ['#', 'Camera'],
   ['cam.zoom', 'Đẩy camera', 'range', 0, .4, .01], ['cam.dx', 'Trôi ngang', 'range', -300, 300, 1], ['cam.dy', 'Trôi dọc', 'range', -300, 300, 1],
@@ -162,7 +188,8 @@ const SCENE_FIELDS = [
   ['#', 'Màu ảnh'],
   ['look.bright', 'Độ sáng', 'range', .5, 1.5, .01], ['look.contrast', 'Tương phản', 'range', .5, 1.6, .01], ['look.sat', 'Độ đậm màu', 'range', 0, 2, .01],
 ];
-const TIME = [['#', 'Thời gian'], ['at', 'Bắt đầu sau (s)', 'num', 0, 120, .05], ['end', 'Ẩn sau (s) · 0 = giữ đến hết', 'num', 0, 120, .1], ['opacity', 'Độ trong suốt', 'range', .05, 1, .01]];
+const TIME = [['#', 'Thời gian'], ['at', 'Bắt đầu sau (s)', 'num', 0, 120, .05], ['end', 'Ẩn sau (s) · 0 = giữ đến hết', 'num', 0, 120, .1], ['opacity', 'Độ trong suốt', 'range', .05, 1, .01],
+  ['#', 'Âm thanh'], ['sfx', 'Khi hiện phát', 'select', SFX], ['sfxVol', 'Âm lượng', 'range', 0, 2, .05, L => L.sfx && L.sfx !== 'none']];
 const notDot = L => L.style !== 'dot';
 const LAYER_FIELDS = {
   pin: [
@@ -211,6 +238,15 @@ const LAYER_FIELDS = {
     ['glow', 'Độ phát sáng', 'range', 0, 60, 1], ['blend', 'Hoà màu', 'select', [['', 'Theo kiểu'], ['normal', 'Bình thường'], ['screen', 'Hoà sáng (hợp mặt nước)']]],
     ['anim', 'Kiểu hiện', 'select', [['', 'Theo kiểu'], ['spread', 'Giãn rồi thu'], ['chars', 'Hiện từng ký tự'], ['fade', 'Mờ dần']]],
   ],
+  text: [
+    ['#', 'Chữ'], ['kicker', 'Dòng viết tay (nhỏ, phía trên)', 'text'], ['text', 'Dòng chính', 'text'], ['upper', 'Viết hoa dòng chính', 'check'],
+    ['font', 'Font dòng chính', 'select', [['sans', 'Be Vietnam Pro (hiện đại)'], ['display', 'Montserrat (mạnh)'], ['serif', 'Playfair (sang trọng)']]],
+    ['size', 'Cỡ chữ', 'range', 24, 260, 1], ['kickerScale', 'Cỡ dòng viết tay', 'range', .3, 1.2, .01], ['spacing', 'Giãn chữ', 'range', -4, 30, .5],
+    ['color', 'Màu dòng chính', 'color'], ['kickerColor', 'Màu dòng viết tay', 'color'],
+    ['#', 'Bố cục & hiệu ứng'], ['align', 'Căn theo điểm đặt', 'select', [['left', 'Trái'], ['center', 'Giữa'], ['right', 'Phải']]],
+    ['anim', 'Kiểu hiện', 'select', [['rise', 'Trượt lên + rõ dần'], ['mask', 'Quét lộ từ trái'], ['type', 'Gõ chữ'], ['letters', 'Bật từng chữ'], ['zoom', 'Phóng nhẹ']]],
+    ['bg', 'Nền chữ', 'select', [['none', 'Không'], ['bar', 'Dải tối mờ phía sau']]], ['shadow', 'Bóng đổ', 'check'], ['screen', 'Cố định trên màn hình (không theo camera)', 'check'],
+  ],
   image: [
     ['#', 'Ảnh'], ['src', 'Tệp ảnh', 'file'], ['w', 'Chiều rộng (px)', 'range', 40, 1920, 1], ['rot', 'Xoay (°)', 'range', -45, 45, .5],
     ['frame', 'Khung', 'select', [['none', 'Không khung (giữ nền trong suốt)'], ['round', 'Bo góc'], ['white', 'Viền trắng kiểu ảnh in'], ['circle', 'Hình tròn']]],
@@ -230,9 +266,11 @@ const DEF = {
   'highlight:style': 'fill', 'highlight:strength': .9, 'highlight:lineColor': '#FFF27A', 'highlight:lineWidth': 6, 'highlight:blinks': 2, 'highlight:pulse': false,
   'tag:titleStyle': 'lime', 'tag:titleColor': '#FFFFFF', 'tag:titleSize': 96, 'tag:titleAnim': 'pop', 'tag:numSize': 78, 'tag:rowColor': '#FFFFFF', 'tag:count': true, 'tag:align': 'right', 'tag:rot': -9,
   'ptext:color': '#FFE34D', 'ptext:weight': '', 'ptext:glow': 24, 'ptext:blend': '', 'ptext:anim': '',
+  'text:upper': true, 'text:font': 'sans', 'text:size': 96, 'text:kickerScale': .6, 'text:spacing': 2, 'text:color': '#FFFFFF', 'text:kickerColor': '#FFFFFF', 'text:align': 'left', 'text:anim': 'rise', 'text:bg': 'none', 'text:shadow': true, 'text:screen': true,
+  sfx: 'none', sfxVol: 1, audio: false, audioVol: 1, musicVol: .8, musicOffset: 0, musicFadeIn: 1, musicFadeOut: 2, musicLoop: true, sfxOn: true, 'project:sfxVol': .8,
   'image:w': 360, 'image:rot': 0, 'image:frame': 'none', 'image:radius': 24, 'image:border': 0, 'image:borderColor': '#FFFFFF', 'image:shadow': true, 'image:anim': 'fade', 'image:float': false, 'image:screen': false,
 };
-const defOf = (o, k) => DEF[`${o.type}:${k}`] ?? DEF[k];
+const defOf = (o, k) => DEF[`${o.type || (o === P ? 'project' : 'scene')}:${k}`] ?? DEF[k];
 const getK = (o, k) => k === 'rowsText' ? (o.rows || []).map(r => [r.label, r.value, r.unit].join(' | ')).join('\n') : k.split('.').reduce((a, x) => a?.[x], o);
 function setK(o, k, v) {
   if (k === 'rowsText') { o.rows = v.split('\n').filter(Boolean).map(l => { const [label = '', value = '0', unit = ''] = l.split('|').map(s => s.trim()); return { label, value: parseFloat(value.replace(',', '.')) || 0, unit }; }); return; }
@@ -246,7 +284,7 @@ function form(obj, defs) {
   let hide = false;
   for (const [k, label, kind, a, b, step, show] of defs) {
     if (k === '#') {
-      const key = `${obj.type || 'scene'}:${label}`, h = btn(label, () => {
+      const key = `${obj.type || (obj === P ? 'project' : 'scene')}:${label}`, h = btn(label, () => {
         closed.has(key) ? closed.delete(key) : closed.add(key);
         try { localStorage.setItem('pcs-closed', JSON.stringify([...closed])); } catch {}
         renderInspector();
@@ -261,8 +299,14 @@ function form(obj, defs) {
     let input, val = getK(obj, k) ?? defOf(obj, k);
     if (kind === 'file') {
       const wrap = document.createElement('div'); wrap.className = 'row';
-      wrap.append(btn(val ? 'Đổi ảnh…' : 'Chọn ảnh…', () => pickFile('image/*', async f => { setK(obj, k, await fileToDataURL(f, { alpha: true, max: 1600 })); save(); renderInspector(); redraw(); })));
-      if (val && k !== 'src') wrap.append(btn('Bỏ', () => { setK(obj, k, ''); save(); renderInspector(); redraw(); }, 'ghost'));
+      const audio = a === 'audio/*';
+      wrap.append(btn(val ? (audio ? 'Đổi nhạc…' : 'Đổi ảnh…') : (audio ? 'Chọn tệp nhạc…' : 'Chọn ảnh…'), () => pickFile(a || 'image/*', async f => {
+        setK(obj, k, audio ? f : await fileToDataURL(f, { alpha: true, max: 1600 }));
+        if (audio) obj.musicName = f.name;
+        save(); renderInspector(); redraw();
+      })));
+      if (audio && val) { const n = document.createElement('small'); n.className = 'fname'; n.textContent = obj.musicName || 'đã chọn'; wrap.append(n); }
+      if (val && k !== 'src') wrap.append(btn('Bỏ', () => { delete obj[k]; if (audio) delete obj.musicName; save(); renderInspector(); redraw(); }, 'ghost'));
       row.appendChild(wrap); box.appendChild(row); continue;
     }
     if (kind === 'select') {
@@ -310,9 +354,26 @@ function armed(b, label, fn) {
 const btn = (text, fn, cls = '') => { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.onclick = fn; if (cls) b.className = cls; return b; };
 const layerLabel = L => (L.label || L.text || L.title || NAME[L.type]).split('\n')[0].slice(0, 22);
 
+const PROJECT_FIELDS = [
+  ['#', 'Nhạc nền'], ['music', 'Tệp nhạc', 'file', 'audio/*'], ['musicVol', 'Âm lượng nhạc', 'range', 0, 1, .01, o => o.music],
+  ['musicOffset', 'Bắt đầu từ giây (trong bài)', 'num', 0, 3600, .5, o => o.music], ['musicFadeIn', 'Mờ vào đầu (s)', 'range', 0, 6, .1, o => o.music],
+  ['musicFadeOut', 'Mờ ra cuối (s)', 'range', 0, 10, .1, o => o.music], ['musicLoop', 'Lặp lại nếu bài ngắn hơn video', 'check', , , , o => o.music],
+  ['#', 'Hiệu ứng âm thanh'], ['sfxOn', 'Bật hiệu ứng âm thanh', 'check'], ['sfxVol', 'Âm lượng chung', 'range', 0, 1.5, .01, o => o.sfxOn !== false],
+];
 function renderInspector() {
   const box = $('inspector'), keep = box.scrollTop;
   box.innerHTML = '';
+  $('audioBtn').classList.toggle('on', panel === 'audio');
+  if (panel === 'audio') {
+    const top = document.createElement('div'); top.className = 'eyebrow';
+    top.append(btn('← Về cảnh', () => { panel = null; renderInspector(); }, 'ghost'));
+    const h = document.createElement('h3'); h.textContent = 'Âm thanh của video';
+    const tip = document.createElement('p'); tip.className = 'tip';
+    tip.textContent = 'Tiếng gốc của từng video nền bật trong bảng của cảnh đó. Âm thanh khi hiện của mỗi ghim, nhãn, tuyến… chỉnh trong bảng của lớp, nhóm "Âm thanh".';
+    box.append(top, h, form(P, PROJECT_FIELDS));
+    box.append(document.createElement('hr'), tip);
+    return;
+  }
   const sc = scene();
   if (!sc) { box.innerHTML = '<div class="eyebrow">Thuộc tính</div><p style="color:var(--mute);margin-top:10px">Chưa có cảnh nào.</p>'; return; }
   if (sel) {
@@ -354,31 +415,31 @@ function renderInspector() {
 
 // ---------- Thao tác
 function openScene(i) {
-  cur = i; sel = null; draft = []; stop();
+  cur = i; sel = null; panel = null; draft = []; stop();
   t = timeline(P).starts[i] || 0;
   setMode('edit'); renderScenes(); renderInspector(); redraw();
 }
-function select(L) { sel = L; $('inspector').scrollTop = 0; renderInspector(); redraw(); }
-function add(L) { scene().layers.push(L); sel = L; save(); $('inspector').scrollTop = 0; renderInspector(); renderStrip(); redraw(); }
+function select(L) { sel = L; if (L) panel = null; $('inspector').scrollTop = 0; renderInspector(); redraw(); }
+function add(L) { L.sfx ??= SFX_DEFAULT[L.type] || 'none'; step(() => scene().layers.push(L)); sel = L; $('inspector').scrollTop = 0; renderInspector(); renderStrip(); redraw(); }
 function deleteSel() {
   if (!sel) return;
-  const ls = scene().layers; ls.splice(ls.indexOf(sel), 1); sel = null;
-  save(); renderInspector(); renderStrip(); redraw();
+  const ls = scene().layers; step(() => ls.splice(ls.indexOf(sel), 1)); sel = null;
+  renderInspector(); renderStrip(); redraw();
 }
 function moveLayer(i, d) {
   const ls = scene().layers, j = i + d;
   if (j < 0 || j >= ls.length) return;
-  [ls[i], ls[j]] = [ls[j], ls[i]]; save(); redraw();
+  step(() => { [ls[i], ls[j]] = [ls[j], ls[i]]; }); redraw();
 }
 function moveScene(d) {
   const j = cur + d;
   if (j < 0 || j >= P.scenes.length) return;
-  [P.scenes[cur], P.scenes[j]] = [P.scenes[j], P.scenes[cur]]; cur = j;
-  save(); renderAll(); redraw();
+  step(() => { [P.scenes[cur], P.scenes[j]] = [P.scenes[j], P.scenes[cur]]; }); cur = j;
+  renderAll(); redraw();
 }
 function deleteScene() {
-  P.scenes.splice(cur, 1); cur = Math.max(0, cur - 1); sel = null;
-  save(); renderAll(); redraw();
+  step(() => P.scenes.splice(cur, 1)); cur = Math.max(0, cur - 1); sel = null;
+  renderAll(); redraw();
 }
 function finishDraft() {
   if (tool === 'route' && draft.length >= 2) add({ type: 'route', pts: draft, color: '#41E8FF', width: 1, at: .3, dur: 1.2 });
@@ -419,6 +480,7 @@ function hit(L, p, tol) {
   if (L.type === 'callout') { const st = L.stem ?? 90, f = (L.fontSize || 22) / 22; return Math.abs(x - L.x) < 140 * f && (L.dir === 'down' ? y > L.y && y < L.y + st + 50 * f : y < L.y && y > L.y - st - 50 * f); }
   if (L.type === 'tag') { const f = (L.titleSize || 96) / 96; return (L.align === 'left' ? x > L.x - 20 && x < L.x + 560 * f : x < L.x + 20 && x > L.x - 560 * f) && y > L.y - 110 * f && y < L.y + 200 * f; }
   if (L.type === 'image') { const [w, h] = imageBox(L); return Math.abs(x - L.x) < w / 2 && Math.abs(y - L.y) < h / 2; }
+  if (L.type === 'text') { const [x0, y0, w, h] = textBox(L); return x > x0 - 10 && x < x0 + w + 10 && y > y0 - 10 && y < y0 + h + 10; }
   if (L.type === 'route') return hs.some((h, i) => i && segDist(hs[i - 1], h, p) < tol);
   return inPoly(hs, p);
 }
@@ -441,6 +503,7 @@ stage.addEventListener('pointerdown', e => {
     case 'pin': return add({ type: 'pin', x: p[0], y: p[1], size: 1.3, at: .3, label: '', labelAt: 1, focus: false });
     case 'callout': return add({ type: 'callout', x: p[0], y: p[1], text: 'TIỆN ÍCH', stem: 90, color: '#2BD47A', at: .5 + .35 * sc.layers.filter(l => l.type === 'callout').length });
     case 'tag': return add({ type: 'tag', x: p[0], y: p[1], rot: -9, title: 'LIỀN KỀ GÓC', rows: [{ label: 'DT đất', value: 109.3, unit: 'm²' }, { label: 'DTXD', value: 323.2, unit: 'm²' }], at: .5 });
+    case 'text': return add({ type: 'text', x: p[0], y: p[1], kicker: 'Tiện ích', text: 'Đẳng cấp', size: 96, align: 'left', anim: 'rise', screen: true, at: .3 });
     case 'image':
       imgAt = p;
       return pickFile('image/*', async f => add({ type: 'image', x: imgAt[0], y: imgAt[1], w: 360, src: await fileToDataURL(f, { alpha: true, max: 1600 }), frame: 'none', at: .4 }));
@@ -476,6 +539,9 @@ stage.addEventListener('dblclick', () => { if (tool === 'route' || tool === 'hig
 
 addEventListener('keydown', e => {
   if (e.target.closest?.('input,textarea,select')) return;
+  const mod = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
+  if (mod && key === 'z') { e.preventDefault(); return e.shiftKey ? redo() : undo(); }
+  if (mod && key === 'y') { e.preventDefault(); return redo(); }
   if (e.key === 'Enter') return finishDraft();
   if (e.key === 'Escape') { if (draft.length) { draft = []; redraw(); } else setTool('select'); return; }
   if ((e.key === 'Delete' || e.key === 'Backspace') && sel) { e.preventDefault(); return deleteSel(); }
@@ -484,6 +550,8 @@ addEventListener('keydown', e => {
 });
 $('tools').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setTool(b.dataset.tool); });
 $('editMode').onclick = () => { stop(); setMode('edit'); };
+$('undoBtn').onclick = undo; $('redoBtn').onclick = redo;
+$('audioBtn').onclick = () => { panel = panel === 'audio' ? null : 'audio'; sel = null; renderInspector(); redraw(); };
 $('viewMode').onclick = () => setMode('view');
 
 // ---------- Timeline & phát
@@ -500,6 +568,18 @@ $('strip').addEventListener('pointerdown', e => {
   const mv = ev => seekFromStrip(ev), up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); };
   addEventListener('pointermove', mv); addEventListener('pointerup', up);
 });
+let ac, musicEl;
+const audioCtx = () => ac ||= new AudioContext();
+function syncMusic() {
+  if (!P.music || !playing) { musicEl?.pause(); return; }
+  if (musicEl?._blob !== P.music) { musicEl?.pause(); musicEl = new Audio(URL.createObjectURL(P.music)); musicEl._blob = P.music; }
+  const d = musicEl.duration, total = timeline(P).total;
+  let target = (P.musicOffset || 0) + t;
+  if (d && target >= d) { if (P.musicLoop === false) { musicEl.pause(); return; } target %= d; }
+  musicEl.volume = Math.max(0, Math.min(1, musicGain(P, t, total)));
+  if (Math.abs(musicEl.currentTime - target) > .3) musicEl.currentTime = target;
+  if (musicEl.paused) musicEl.play().catch(() => {});
+}
 function play() {
   const { total } = timeline(P);
   if (!total || exporting) return;
@@ -507,9 +587,14 @@ function play() {
   playing = true; $('play').textContent = '❚❚'; $('play').setAttribute('aria-label', 'Tạm dừng');
   sel = null; setMode('view');
   let last = performance.now();
+  const cues = sfxCues(P), a = cues.length ? audioCtx() : null;
+  a?.resume();
   const loop = now => {
     if (!playing) return;
+    const prev = t;
     t = Math.min(total, t + (now - last) / 1000); last = now;
+    for (const c of cues) if (c.t > prev && c.t <= t) playSfx(a, a.destination, a.currentTime, c.kind, c.vol);
+    syncMusic();
     const i = sceneAt(P, t).i;
     if (i !== cur) { cur = i; renderScenes(); renderInspector(); }
     redraw();
@@ -526,7 +611,7 @@ function previewTrans() {
 }
 function stop() {
   playing = false; $('play').textContent = '▶'; $('play').setAttribute('aria-label', 'Phát');
-  Object.values(imgs).forEach(v => v.pause?.());
+  Object.values(imgs).forEach(v => v.pause?.()); musicEl?.pause();
 }
 $('play').onclick = () => playing ? stop() : play();
 
@@ -584,12 +669,14 @@ async function load(data) {
   if (!Array.isArray(data?.scenes)) throw new Error('Tệp này không phải dự án Phối Cảnh Studio.');
   // video trong tệp .json được lưu dạng chuỗi; đổi lại thành Blob để phát và lưu trong trình duyệt
   for (const sc of data.scenes) if (typeof sc.video === 'string') sc.video = await (await fetch(sc.video)).blob();
+  if (typeof data.music === 'string') data.music = await (await fetch(data.music)).blob();
   P = { w: 1920, h: 1080, fps: 30, ...data }; cur = 0; sel = null; t = 0; draft = [];
   save(); renderAll(); openScene(0);
 }
-$('demoBtn').onclick = async () => load(await (await fetch('demo.json')).json());
+$('demoBtn').onclick = async () => load(await (await fetch('demo.json', { cache: 'no-cache' })).json());
 $('saveBtn').onclick = async () => {
   const data = { ...P, scenes: await Promise.all(P.scenes.map(async sc => sc.video instanceof Blob ? { ...sc, video: await blobToDataURL(sc.video) } : sc)) };
+  if (P.music instanceof Blob) data.music = await blobToDataURL(P.music);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
   a.download = `${P.scenes[0]?.name || 'du-an'}.json`; a.click();
@@ -622,15 +709,36 @@ $('exportBtn').onclick = async () => {
   b.textContent = 'Đang chuẩn bị…';
   try {
     const { Muxer, ArrayBufferTarget } = await import('https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.1/build/mp4-muxer.mjs');
-    await Promise.all([...Object.values(imgs).map(i => i.decode?.().catch(() => {})), preloadMedia(P), ...['600', '800', '900'].map(w => document.fonts.load(`${w} 40px ${FONT}`))]);
+    await Promise.all([...Object.values(imgs).map(i => i.decode?.().catch(() => {})), preloadMedia(P), ...FONTS.map(f => document.fonts.load(f, FONT_SAMPLE))]);
     let cfg;
     for (const codec of ['avc1.64002A', 'avc1.4D402A', 'avc1.42002A']) {
       const c = { codec, width: W, height: H, bitrate: fps > 30 ? 16e6 : 12e6, framerate: fps };
       if ((await VideoEncoder.isConfigSupported(c)).supported) { cfg = c; break; }
     }
     if (!cfg) throw new Error('Máy này không mã hoá được H.264 ở độ phân giải này.');
-    const muxer = new Muxer({ target: new ArrayBufferTarget(), video: { codec: 'avc', width: W, height: H }, fastStart: 'in-memory' });
+    b.textContent = 'Đang trộn âm thanh…';
+    const mix = await mixAudio(P);
+    let acfg;
+    if (mix) for (const codec of ['mp4a.40.2', 'opus']) {
+      const c = { codec, sampleRate: 48000, numberOfChannels: 2, bitrate: 192000 };
+      if ((await AudioEncoder.isConfigSupported(c)).supported) { acfg = c; break; }
+    }
+    const muxer = new Muxer({ target: new ArrayBufferTarget(), video: { codec: 'avc', width: W, height: H },
+      audio: acfg && { codec: acfg.codec === 'opus' ? 'opus' : 'aac', numberOfChannels: 2, sampleRate: 48000 }, fastStart: 'in-memory' });
     let fail;
+    if (acfg) {
+      // âm thanh đã trộn sẵn → cắt thành từng đoạn 0,1 giây đưa vào bộ mã hoá
+      const aenc = new AudioEncoder({ output: (chunk, meta) => muxer.addAudioChunk(chunk, meta), error: err => fail = err });
+      aenc.configure(acfg);
+      const buf = mix.buffer, N = buf.length, c0 = buf.getChannelData(0), c1 = buf.getChannelData(1);
+      for (let off = 0; off < N; off += 4800) {
+        const n = Math.min(4800, N - off), data = new Float32Array(n * 2);
+        data.set(c0.subarray(off, off + n), 0); data.set(c1.subarray(off, off + n), n);
+        const ad = new AudioData({ format: 'f32-planar', sampleRate: 48000, numberOfFrames: n, numberOfChannels: 2, timestamp: Math.round(off / 48000 * 1e6), data });
+        aenc.encode(ad); ad.close();
+      }
+      await aenc.flush();
+    }
     const enc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: err => fail = err });
     enc.configure(cfg);
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
@@ -650,6 +758,7 @@ $('exportBtn').onclick = async () => {
     a.href = URL.createObjectURL(new Blob([muxer.target.buffer], { type: 'video/mp4' }));
     a.download = `${P.scenes[0].name || 'video'}.mp4`; a.click();
     window.lastExport = a.href;
+    if (mix?.warn.length) alert(`Đã xuất video. Lưu ý:\n• ${mix.warn.join('\n• ')}`);
   } catch (err) {
     if (err.message !== 'cancel') alert(`Xuất video không thành công: ${err.message}`);
   } finally {
@@ -658,6 +767,6 @@ $('exportBtn').onclick = async () => {
 };
 
 // ---------- Khởi động: chờ font để chữ trên canvas vẽ đúng, rồi mở lại dự án đã lưu
-Promise.all(['600', '800', '900'].map(w => document.fonts.load(`${w} 40px ${FONT}`))).then(redraw);
-idb().then(saved => { if (saved?.scenes) P = saved; renderAll(); if (P.scenes.length) openScene(0); });
+Promise.all(FONTS.map(f => document.fonts.load(f, FONT_SAMPLE))).then(redraw);
+idb().then(saved => { if (saved?.scenes) P = saved; lastSnap = snap(); updateUndo(); renderAll(); if (P.scenes.length) openScene(0); });
 renderAll();

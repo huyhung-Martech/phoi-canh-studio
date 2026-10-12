@@ -26,7 +26,8 @@
      "at": 0.4,
      "label": "SX5-01",
      "labelAt": 1.0,
-     "focus": true
+     "focus": true,
+     "sfx": "ting"
     }
    ]
   },
@@ -98,7 +99,8 @@
        "unit": "m²"
       }
      ],
-     "at": 0.5
+     "at": 0.5,
+     "sfx": "shimmer"
     }
    ]
   },
@@ -147,7 +149,8 @@
      "color": "#41E8FF",
      "width": 1,
      "at": 0.35,
-     "dur": 1.1
+     "dur": 1.1,
+     "sfx": "whoosh"
     },
     {
      "type": "route",
@@ -180,7 +183,8 @@
      "color": "#7FA8FF",
      "width": 1.2,
      "at": 0.6,
-     "dur": 1.3
+     "dur": 1.3,
+     "sfx": "whoosh"
     },
     {
      "type": "pin",
@@ -189,7 +193,8 @@
      "size": 1.3,
      "at": 0.1,
      "label": "",
-     "focus": false
+     "focus": false,
+     "sfx": "ting"
     },
     {
      "type": "ptext",
@@ -263,7 +268,8 @@
      "size": 1.3,
      "at": 0.05,
      "label": "",
-     "focus": false
+     "focus": false,
+     "sfx": "ting"
     },
     {
      "type": "callout",
@@ -272,7 +278,8 @@
      "text": "SÂN GOLF",
      "stem": 90,
      "color": "#2BD47A",
-     "at": 0.5
+     "at": 0.5,
+     "sfx": "pop"
     },
     {
      "type": "callout",
@@ -281,7 +288,8 @@
      "text": "CÔNG VIÊN NỘI KHU",
      "stem": 70,
      "color": "#2BD47A",
-     "at": 0.85
+     "at": 0.85,
+     "sfx": "pop"
     },
     {
      "type": "callout",
@@ -290,7 +298,8 @@
      "text": "TIỆN ÍCH THƯƠNG MẠI",
      "stem": 80,
      "color": "#2BD47A",
-     "at": 1.2
+     "at": 1.2,
+     "sfx": "pop"
     },
     {
      "type": "callout",
@@ -299,7 +308,21 @@
      "text": "BIỂN HỒ",
      "stem": 120,
      "color": "#2BD47A",
-     "at": 1.55
+     "at": 1.55,
+     "sfx": "pop"
+    },
+    {
+     "type": "text",
+     "x": 110,
+     "y": 975,
+     "kicker": "Tiện ích",
+     "text": "Đẳng cấp",
+     "size": 92,
+     "align": "left",
+     "anim": "rise",
+     "screen": true,
+     "at": 2.1,
+     "sfx": "whoosh"
     }
    ]
   },

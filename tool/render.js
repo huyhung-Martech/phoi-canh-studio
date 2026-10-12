@@ -49,6 +49,11 @@ function shade(hex, f) {
   return `rgb(${r},${g},${b})`;
 }
 const rad = d => (d || 0) * Math.PI / 180;
+// Bộ gõ trên Mac / một số kiểu gõ cho chữ dạng "chữ gốc + dấu rời"; vẽ từng phần sẽ làm rơi dấu → luôn chuẩn hoá về NFC,
+// và khi cần vẽ từng ký tự thì tách theo cụm chữ (grapheme) chứ không theo mã ký tự
+export const nfc = s => String(s ?? '').normalize('NFC');
+const segmenter = typeof Intl !== 'undefined' && Intl.Segmenter && new Intl.Segmenter('vi', { granularity: 'grapheme' });
+const graphemes = s => segmenter ? [...segmenter.segment(nfc(s))].map(x => x.segment) : [...nfc(s)];
 
 // ---------- Ghim + tia sáng + quầng + vòng sóng + nhãn chữ
 const ICON = {
@@ -114,14 +119,14 @@ function pin(ctx, L, u) {
   if (!w) return;
   const fs = L.labelSize || 92, pos = L.labelPos || 'above', top = L.style === 'dot' ? 40 * s : 125 * s;
   ctx.save(); ctx.globalAlpha = A0; ctx.font = `900 ${fs}px ${FONT}`; ctx.letterSpacing = '2px';
-  const tw = ctx.measureText(L.label).width;
+  const label = nfc(L.label), tw = ctx.measureText(label).width;
   const [lx, by] = pos === 'below' ? [x - tw / 2, y + fs * .9 + 24 - 18 * (1 - w)] : pos === 'right' ? [x + 50 * s + 24, y - top / 2 + fs * .35] : [x - tw / 2, y - top - 30 - 18 * w];
   ctx.beginPath(); ctx.rect(lx - 20, by - fs * 1.4, (tw + 40) * w, fs * 2); ctx.clip();
   const c = L.labelStyle === 'color' ? [shade(L.labelColor, .5), L.labelColor, shade(L.labelColor, -.25), shade(L.labelColor, .3)] : LABEL[L.labelStyle] || LABEL.gold;
   const lg = ctx.createLinearGradient(0, by - fs * .8, 0, by);
   c.forEach((v, i) => lg.addColorStop([0, .45, .6, 1][i], v));
   ctx.shadowColor = 'rgba(0,0,0,.55)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 4;
-  ctx.fillStyle = lg; ctx.fillText(L.label, lx, by); ctx.restore();
+  ctx.fillStyle = lg; ctx.fillText(label, lx, by); ctx.restore();
 }
 
 // ---------- Tuyến sáng: đường cong mượt qua các điểm, vẽ dần rồi có hạt sáng chạy liên tục
@@ -200,7 +205,7 @@ function callout(ctx, L, u) {
   const a = prog(u, 0, .55);
   if (a <= 0) return;
   const A0 = ctx.globalAlpha, { x, y } = L, stem = L.stem ?? 90, fs = L.fontSize || 22, down = L.dir === 'down';
-  const st = (CALLOUT[L.style] || CALLOUT.green)(L.color), text = (L.icon ? `${L.icon}  ` : '') + L.text;
+  const st = (CALLOUT[L.style] || CALLOUT.green)(L.color), text = nfc((L.icon ? `${L.icon}  ` : '') + L.text);
   ctx.save(); ctx.globalAlpha = A0 * clamp(a * 4);
   ctx.font = `800 ${fs}px ${FONT}`; ctx.letterSpacing = `${fs * .07}px`;
   const tw = ctx.measureText(text).width, w = tw + fs * 2.2, h = fs * 2, cy = down ? y + stem + h / 2 : y - stem - h / 2;
@@ -247,7 +252,7 @@ function tag(ctx, L, u) {
   const tc = L.titleStyle === 'color' ? [shade(L.titleColor, .5), L.titleColor, shade(L.titleColor, -.3)] : TITLE[L.titleStyle] || TITLE.lime;
   ctx.save(); ctx.translate(L.x, L.y); ctx.rotate(rad(L.rot ?? -9));
   ctx.font = `900 ${ts}px ${FONT}`; ctx.letterSpacing = '1px'; ctx.textBaseline = 'alphabetic';
-  const chars = [...(L.title || '')], ws = chars.map(ch => ctx.measureText(ch).width);
+  const chars = graphemes(L.title), ws = chars.map(ch => ctx.measureText(ch).width);
   let cx = left ? 0 : -ws.reduce((a, b) => a + b, 0);
   chars.forEach((ch, i) => {
     const a = anim === 'type' ? (u >= .25 + i * .06 ? 1 : 0) : anim === 'fade' ? prog(u, .25, .85) : prog(u, .25 + i * .07, .45 + i * .07);
@@ -270,7 +275,7 @@ function tag(ctx, L, u) {
     ctx.save(); ctx.globalAlpha = A0 * clamp(a * 3); ctx.translate(40 * (1 - easeOut(a)) * (left ? -1 : 1), ts + i * ns * 1.15);
     ctx.fillStyle = L.rowColor || '#fff'; ctx.letterSpacing = '0px';
     ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 5; ctx.shadowOffsetY = 3;
-    const parts = [[r.label || '', `600 ${30 * f}px ${FONT}`, 10 * f], [num, `900 ${ns}px ${FONT}`, 6 * f], [r.unit || '', `800 ${40 * f}px ${FONT}`, 0]];
+    const parts = [[nfc(r.label), `600 ${30 * f}px ${FONT}`, 10 * f], [num, `900 ${ns}px ${FONT}`, 6 * f], [nfc(r.unit), `800 ${40 * f}px ${FONT}`, 0]];
     let rx = 0;
     ctx.textAlign = left ? 'left' : 'right';
     if (left) for (const [txt, font, gap] of parts) { ctx.font = font; ctx.fillText(txt, rx, 0); rx += ctx.measureText(txt).width + gap; }
@@ -314,7 +319,7 @@ function ptext(ctx, L, u) {
   if (u < 0 || L.quad.length < 4) return;
   const st = { ...(STYLES[L.style] || STYLES.road) };
   for (const k of ['weight', 'color', 'blend', 'anim']) if (L[k]) st[k] = L[k];
-  const lines = L.text.split('\n'), fs = 100, g = textBuf.getContext('2d'), font = `${st.weight} ${fs}px ${FONT}`;
+  const lines = nfc(L.text).split('\n'), fs = 100, g = textBuf.getContext('2d'), font = `${st.weight} ${fs}px ${FONT}`;
   g.font = font; g.letterSpacing = '6px';
   const W = Math.ceil(Math.max(...lines.map(l => g.measureText(l).width)) + 80), H = lines.length * fs * 1.15 + 60;
   textBuf.width = W; textBuf.height = H;
@@ -324,7 +329,7 @@ function ptext(ctx, L, u) {
     lines.forEach((l, li) => {
       g.letterSpacing = '6px';
       let x = (W - g.measureText(l).width) / 2;
-      for (const ch of l) { g.globalAlpha = .9 * prog(u, n * .045, .4 + n++ * .045); g.fillText(ch, x, 30 + fs * 1.15 * (li + .5)); x += g.measureText(ch).width; }
+      for (const ch of graphemes(l)) { g.globalAlpha = .9 * prog(u, n * .045, .4 + n++ * .045); g.fillText(ch, x, 30 + fs * 1.15 * (li + .5)); x += g.measureText(ch).width; }
     });
   } else {
     g.globalAlpha = prog(u, 0, st.anim === 'fade' ? .9 : .5); g.textAlign = 'center';
@@ -370,7 +375,78 @@ function image(ctx, L, u) {
   ctx.restore();
 }
 
-const DRAW = { pin, route, callout, highlight, tag, ptext, image };
+// ---------- Chữ tiêu đề: dòng viết tay nhỏ phía trên + dòng chữ đậm lớn (vd. "Tiện ích / ĐẲNG CẤP")
+// Google Fonts tải riêng phần chữ tiếng Việt khi trang cần; chữ vẽ trên canvas không tự kích hoạt việc đó,
+// nên khi nạp font phải đưa kèm chuỗi mẫu có dấu để trình duyệt tải cả phần tiếng Việt
+export const FONT_SAMPLE = 'AaĐđĂăÂâÊêÔôƠơƯưẲẳẤấẦầỆệÍíỈỉỊịỌọỢợỬửỶỷÝýẼẽ0123456789m²';
+export const FONTS = ["600 40px 'Be Vietnam Pro'", "800 40px 'Be Vietnam Pro'", "900 40px 'Be Vietnam Pro'", "600 40px 'Dancing Script'", "700 40px 'Dancing Script'", "900 40px 'Playfair Display'", "900 40px 'Montserrat'"];
+const TFONT = { sans: "'Be Vietnam Pro'", serif: "'Playfair Display'", display: "'Montserrat'" };
+const measure = typeof document !== 'undefined' && document.createElement('canvas').getContext('2d');
+function textLines(L) {
+  const fs = L.size || 96, main = nfc(L.upper === false ? L.text : nfc(L.text).toUpperCase());
+  return { fs, kf: fs * (L.kickerScale ?? .6), main, kicker: nfc(L.kicker), mainFont: `900 ${fs}px ${TFONT[L.font] || TFONT.sans}, sans-serif` };
+}
+// Khung bao của chữ tiêu đề (để chọn / kéo trong trình chỉnh sửa)
+export function textBox(L) {
+  const { fs, kf, main, kicker, mainFont } = textLines(L);
+  measure.font = mainFont; measure.letterSpacing = `${L.spacing ?? 2}px`;
+  const w1 = measure.measureText(main).width;
+  measure.font = `700 ${kf}px 'Dancing Script', cursive`; measure.letterSpacing = '0px';
+  // chữ in hoa tiếng Việt có dấu chồng 2 tầng (Ẳ, Ấ…) cao hơn chữ thường nhiều → chừa đủ khoảng phía trên
+  const w = Math.max(w1, kicker ? measure.measureText(kicker).width + fs * .2 : 0), top = kicker ? fs * 1.34 + kf * .95 : fs * 1.2;
+  const x0 = L.align === 'center' ? L.x - w / 2 : L.align === 'right' ? L.x - w : L.x;
+  return [x0, L.y - top, w, top + fs * .24];
+}
+function drawLine(ctx, str, font, y, color, align, spacing, fx, perChar) {
+  ctx.font = font; ctx.letterSpacing = `${spacing}px`; ctx.fillStyle = color;
+  if (!perChar) {
+    const { a = 1, dy = 0, s = 1 } = fx(0, 1);
+    if (a > 0) { ctx.save(); ctx.globalAlpha *= a; ctx.translate(0, y + dy); ctx.scale(s, s); ctx.textAlign = align; ctx.fillText(str, 0, 0); ctx.restore(); }
+    return;
+  }
+  const chars = graphemes(str), ws = chars.map(ch => ctx.measureText(ch).width), total = ws.reduce((a, b) => a + b, 0);
+  let x = align === 'center' ? -total / 2 : align === 'right' ? -total : 0;
+  ctx.textAlign = 'center';
+  chars.forEach((ch, i) => {
+    const { a = 1, dy = 0, s = 1 } = fx(i, chars.length);
+    if (a > 0) { ctx.save(); ctx.globalAlpha *= a; ctx.translate(x + ws[i] / 2, y + dy); ctx.scale(s, s); ctx.fillText(ch, 0, 0); ctx.restore(); }
+    x += ws[i];
+  });
+}
+function text(ctx, L, u) {
+  if (u < 0) return;
+  const { fs, kf, main, kicker, mainFont } = textLines(L), align = L.align || 'left', anim = L.anim || 'rise', sp = L.spacing ?? 2;
+  ctx.save();
+  if (L.screen !== false) ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.translate(L.x, L.y);
+  const kY = -fs * 1.34, kX = align === 'left' ? fs * .1 : 0;
+  if (L.bg === 'bar') {
+    const [x0, y0, w, h] = textBox({ ...L, x: 0, y: 0 }), g = ctx.createLinearGradient(x0 - fs * .6, 0, x0 + w + fs * 1.4, 0);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(.18, 'rgba(0,0,0,.5)'); g.addColorStop(.8, 'rgba(0,0,0,.42)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.save(); ctx.globalAlpha *= easeOut(prog(u, 0, .5)); ctx.fillStyle = g; ctx.fillRect(x0 - fs * .6, y0 - fs * .15, w + fs * 2, h + fs * .3); ctx.restore();
+  }
+  if (L.shadow !== false) { ctx.shadowColor = 'rgba(0,0,0,.55)'; ctx.shadowBlur = fs * .14; ctx.shadowOffsetY = fs * .04; }
+  // mỗi kiểu hiện = một hàm trả về độ hiện / độ lệch / tỉ lệ cho từng ký tự của dòng
+  const lineFx = (start, n) => {
+    if (anim === 'type') { const per = .045; return i => ({ a: u >= start + i * per ? 1 : 0 }); }
+    if (anim === 'letters') return i => { const a = prog(u, start + i * .05, start + i * .05 + .3), e = easeOut(a); return { a, dy: -fs * .3 * (1 - e), s: 1.4 - .4 * e }; };
+    const a = prog(u, start, start + .7), e = easeOut(a);
+    if (anim === 'zoom') return () => ({ a, s: .8 + .2 * e });
+    if (anim === 'mask') return () => ({ a: 1 });
+    return () => ({ a, dy: fs * .45 * (1 - e) });
+  };
+  const perChar = anim === 'type' || anim === 'letters', mainStart = kicker ? (anim === 'type' ? graphemes(kicker).length * .045 + .1 : .18) : 0;
+  const reveal = (start, draw) => {
+    if (anim !== 'mask') return draw();
+    const k = easeInOut(prog(u, start, start + .8)), [x0, y0, w, h] = textBox({ ...L, x: 0, y: 0 });
+    ctx.save(); ctx.beginPath(); ctx.rect(x0 - 20, y0 - fs * .4, (w + 40) * k, h + fs); ctx.clip(); draw(); ctx.restore();
+  };
+  if (kicker) reveal(0, () => { ctx.save(); ctx.translate(kX, 0); drawLine(ctx, kicker, `700 ${kf}px 'Dancing Script', cursive`, kY, L.kickerColor || '#FFFFFF', align, 0, lineFx(0), perChar); ctx.restore(); });
+  reveal(mainStart, () => drawLine(ctx, main, mainFont, 0, L.color || '#FFFFFF', align, sp, lineFx(mainStart), perChar));
+  ctx.restore();
+}
+
+const DRAW = { pin, route, callout, highlight, tag, ptext, image, text };
 
 // Các điểm có thể kéo của một lớp (dùng cho trình chỉnh sửa). Ảnh chèn: tâm + góc dưới phải để đổi cỡ
 export function handles(L) {
@@ -414,6 +490,7 @@ export function drawScene(ctx, sc, u, img, W, H, opts = {}) {
     ctx.save(); ctx.lineWidth = 3; ctx.strokeStyle = '#41E8FF'; ctx.fillStyle = 'rgba(14,22,34,.85)';
     const hs = handles(S);
     if (S.type === 'image') { const [w, h] = imgSize(S); ctx.setLineDash([8, 6]); ctx.strokeRect(S.x - w / 2, S.y - h / 2, w, h); ctx.setLineDash([]); }
+    else if (S.type === 'text') { ctx.setLineDash([8, 6]); ctx.strokeRect(...textBox(S)); ctx.setLineDash([]); }
     else if (hs.length > 1) { ctx.setLineDash([8, 6]); ctx.beginPath(); hs.forEach((p, i) => i ? ctx.lineTo(...p) : ctx.moveTo(...p)); if (S.type !== 'route') ctx.closePath(); ctx.stroke(); ctx.setLineDash([]); }
     for (const p of hs) { ctx.beginPath(); ctx.arc(...p, 10, 0, 7); ctx.fill(); ctx.stroke(); }
     ctx.restore();
