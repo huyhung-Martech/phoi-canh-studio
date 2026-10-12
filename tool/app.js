@@ -108,7 +108,7 @@ function redraw() {
   $('head').style.left = `${total ? t / total * 100 : 0}%`;
   $('head').style.display = mode === 'view' || playing ? '' : 'none';
   $('strip').querySelectorAll('.seg').forEach((s, i) => s.classList.toggle('on', i === cur));
-  $('total').textContent = `${P.scenes.length} cảnh · ${total.toFixed(1)}s`;
+  $('total').textContent = `${P.scenes.length} · ${total.toFixed(1)}s`;
 }
 setOnMediaLoad(() => { if (!playing && !exporting) redraw(); });
 function renderAll() {
@@ -154,7 +154,7 @@ function renderStrip() {
 // Mỗi trường: [khoá, nhãn, kiểu, min|danh sách chọn, max, bước, điều kiện hiện]; ['#', 'Tên nhóm'] là tiêu đề nhóm
 const SCENE_FIELDS = [
   ['name', 'Tên cảnh', 'text'], ['dur', 'Thời lượng (s)', 'num', 1, 120, .1],
-  ['trim', 'Video bắt đầu từ (s)', 'num', 0, 3600, .1, , , sc => sc.kind === 'video'],
+  ['trim', 'Video bắt đầu từ (s)', 'num', 0, 3600, .1, sc => sc.kind === 'video'],
   ['trans', 'Chuyển vào', 'select', TRANSITIONS], ['transDur', 'Độ dài chuyển (s)', 'range', .2, 1.5, .05],
   ['#', 'Camera'],
   ['cam.zoom', 'Đẩy camera', 'range', 0, .4, .01], ['cam.dx', 'Trôi ngang', 'range', -300, 300, 1], ['cam.dy', 'Trôi dọc', 'range', -300, 300, 1],
@@ -239,13 +239,24 @@ function setK(o, k, v) {
   const ks = k.split('.'), last = ks.pop();
   ks.reduce((a, x) => a[x] ||= {}, o)[last] = v;
 }
+// Nhóm đang thu gọn trong bảng thuộc tính, nhớ giữa các lần mở (chỉ là tiện ích cho người dùng)
+const closed = new Set((() => { try { return JSON.parse(localStorage.getItem('pcs-closed') || '[]'); } catch { return []; } })());
 function form(obj, defs) {
   const box = document.createElement('div');
+  let hide = false;
   for (const [k, label, kind, a, b, step, show] of defs) {
-    if (show && !show(obj)) continue;
-    if (k === '#') { const h = document.createElement('div'); h.className = 'group'; h.textContent = label; box.appendChild(h); continue; }
+    if (k === '#') {
+      const key = `${obj.type || 'scene'}:${label}`, h = btn(label, () => {
+        closed.has(key) ? closed.delete(key) : closed.add(key);
+        try { localStorage.setItem('pcs-closed', JSON.stringify([...closed])); } catch {}
+        renderInspector();
+      }, 'group');
+      hide = closed.has(key); h.classList.toggle('closed', hide); h.setAttribute('aria-expanded', !hide);
+      box.appendChild(h); continue;
+    }
+    if (hide || (show && !show(obj))) continue;
     const row = document.createElement('label');
-    row.className = 'field';
+    row.className = kind === 'check' ? 'field check' : 'field';
     row.innerHTML = `<span>${label}</span>`;
     let input, val = getK(obj, k) ?? defOf(obj, k);
     if (kind === 'file') {
@@ -289,11 +300,11 @@ function form(obj, defs) {
 // Xác nhận ngay trên nút: lần bấm đầu đổi nút sang đỏ, bấm lần nữa trong 3 giây mới thực hiện.
 // Không dùng confirm() vì Chrome đang bị điều khiển tự động sẽ tự đóng hộp thoại, coi như bấm Huỷ.
 function armed(b, label, fn) {
+  const reset = () => { clearTimeout(b._t); delete b.dataset.armed; b.textContent = b._label; b.classList.remove('armed'); };
   return () => {
-    if (b.dataset.armed) { clearTimeout(b._t); delete b.dataset.armed; b.classList.remove('armed'); return fn(); }
-    const old = b.textContent;
-    b.dataset.armed = 1; b.textContent = label; b.classList.add('armed');
-    b._t = setTimeout(() => { delete b.dataset.armed; b.textContent = old; b.classList.remove('armed'); }, 3000);
+    if (b.dataset.armed) { reset(); return fn(); }
+    b._label = b.textContent; b.dataset.armed = 1; b.textContent = label; b.classList.add('armed');
+    b._t = setTimeout(reset, 3000);
   };
 }
 const btn = (text, fn, cls = '') => { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.onclick = fn; if (cls) b.className = cls; return b; };
@@ -581,7 +592,9 @@ $('saveBtn').onclick = async () => {
   const data = { ...P, scenes: await Promise.all(P.scenes.map(async sc => sc.video instanceof Blob ? { ...sc, video: await blobToDataURL(sc.video) } : sc)) };
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
-  a.download = `${scene()?.name || 'du-an'}.json`; a.click(); URL.revokeObjectURL(a.href);
+  a.download = `${P.scenes[0]?.name || 'du-an'}.json`; a.click();
+  // giữ đường dẫn thêm một lúc: huỷ ngay có thể làm hỏng lượt tải trên một số trình duyệt
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 };
 $('openBtn').onclick = () => $('jsonInput').click();
 $('jsonInput').addEventListener('change', async e => {
